@@ -100,9 +100,26 @@ Three services are defined. The database is not a service — it is always Neon.
 | GET | `/sets/{set_id}` | Get a single set with metadata |
 | GET | `/sets/{set_id}/cards` | Get all cards for a set |
 | GET | `/cards/{card_id}` | Get a single card with its latest price snapshot |
-| POST | `/ingest/sets/{set_id}` | Trigger an ingest for a specific set |
 
 Interactive API documentation is available at `/docs` (Swagger UI) and `/redoc` when the API is running.
+
+---
+
+## Ingestion
+
+Data ingestion is triggered manually via the CLI for Milestone 1. The ingestion script is intentionally not exposed as an API endpoint at this stage — doing so would create an unprotected attack surface on a public repository with no meaningful benefit during development. An authenticated ingestion endpoint is planned as part of Milestone 5.
+
+To trigger an ingest, run the script directly with a set ID argument:
+
+```bash
+# Docker / Podman
+docker compose run ingestion python run.py --set-id base1
+
+# Native
+python run.py --set-id base1
+```
+
+The Base Set (`base1`) is the target set for Milestone 1.
 
 ---
 
