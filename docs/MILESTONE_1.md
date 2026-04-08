@@ -12,6 +12,8 @@ This document covers the technical structure for Milestone 1: the minimum viable
 | ORM | SQLAlchemy + Alembic |
 | Database | PostgreSQL via [Neon](https://neon.tech) |
 | Frontend | Vue.js, Vite, Axios |
+| UI Components | Vuetify |
+| Charts | Chart.js via vue-chartjs |
 | Containers | Docker / Podman |
 
 ### Database
@@ -21,6 +23,10 @@ PostgreSQL is hosted on Neon for all environments — development, restricted ma
 ### Containers
 
 Docker Compose (or Podman Compose as a drop-in alternative) manages three services: the API, the ingestion script, and the frontend. On machines where a container runtime is not available, all three run natively with no change to the connection targets or configuration. See [DEVELOPMENT_SETUP.md](./DEVELOPMENT_SETUP.md) for full instructions on both modes.
+
+### Frontend Libraries
+
+Vuetify is used as the component library for layout, navigation, tables, and UI primitives. Chart.js is used for data visualization via the `vue-chartjs` wrapper, which provides a thin Vue-native interface over Chart.js. The two libraries are complementary and do not overlap — Vuetify handles structure and components, vue-chartjs handles charts.
 
 ---
 
