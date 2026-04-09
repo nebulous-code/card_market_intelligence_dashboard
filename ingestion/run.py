@@ -4,20 +4,19 @@ Ingestion entry point.
 Usage:
     python run.py --set-id base1
 
-Fetches all cards for the given set from pokemontcg.io and writes them to
-the configured Neon PostgreSQL database. Safe to run multiple times — sets
-and cards are upserted, and price snapshots are always appended.
+Fetches all cards for the given set from TCGdex and writes them to
+the configured Neon PostgreSQL database. Safe to run multiple times —
+sets and cards are upserted on repeat runs.
 """
 
 import argparse
-import sys
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from loader import load_set  # noqa: E402
-from pokemontcg import get_cards, get_set  # noqa: E402
+from tcgdex import get_cards, get_set  # noqa: E402
 
 
 def main() -> None:
@@ -25,7 +24,7 @@ def main() -> None:
     parser.add_argument(
         "--set-id",
         required=True,
-        help="pokemontcg.io set ID to ingest (e.g. base1)",
+        help="TCGdex set ID to ingest (e.g. base1)",
     )
     args = parser.parse_args()
 
@@ -37,7 +36,7 @@ def main() -> None:
 
     print(f"  Fetching cards for '{set_data['name']}'...")
     cards = get_cards(set_id)
-    print(f"  Fetched {len(cards)} cards from pokemontcg.io.")
+    print(f"  Fetched {len(cards)} cards from TCGdex.")
 
     load_set(set_data, cards)
     print("Ingestion complete.")
