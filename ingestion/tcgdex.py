@@ -13,28 +13,41 @@ BASE_URL = "https://api.tcgdex.net/v2/en"
 
 
 def get_set(set_id: str) -> dict[str, Any]:
-    """Fetch metadata for a single set."""
+    """
+    Fetch metadata for a single set.
+
+    The response includes a `cards` array of CardBrief objects which can be
+    passed directly to get_cards() to avoid a redundant network request.
+    """
     response = requests.get(f"{BASE_URL}/sets/{set_id}", timeout=30)
     response.raise_for_status()
     return response.json()
 
 
-def get_cards(set_id: str) -> list[dict[str, Any]]:
+def get_cards(brief_cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Fetch full card details for every card in a set.
+    Fetch full card detail for each card in the provided brief list.
 
-    The brief card list (id, name, image) is embedded in the set response.
-    Each card's full detail (rarity, category, etc.) is then fetched
-    individually via /cards/{card_id}.
+    Accepts the `cards` array embedded in a set response so the caller
+    does not need to re-fetch the set. Each full card is fetched individually
+    via GET /cards/{cardId} — TCGdex has no bulk detail endpoint.
+
+    Cards that return a non-200 response are skipped with a warning rather
+    than aborting the entire ingestion run.
     """
-    set_response = requests.get(f"{BASE_URL}/sets/{set_id}", timeout=30)
-    set_response.raise_for_status()
-    brief_cards: list[dict[str, Any]] = set_response.json().get("cards", [])
-
     full_cards: list[dict[str, Any]] = []
-    for brief in brief_cards:
-        card_response = requests.get(f"{BASE_URL}/cards/{brief['id']}", timeout=30)
-        card_response.raise_for_status()
-        full_cards.append(card_response.json())
+
+    for i, brief in enumerate(brief_cards, start=1):
+        card_id = brief["id"]
+        print(f"  [{i}/{len(brief_cards)}] Fetching card: {card_id} ({brief.get('name', '?')})")
+
+        try:
+            response = requests.get(f"{BASE_URL}/cards/{card_id}", timeout=30)
+            response.raise_for_status()
+            full_cards.append(response.json())
+        except requests.HTTPError as e:
+            print(f"  WARNING: Skipping {card_id} — HTTP {e.response.status_code}")
+        except requests.RequestException as e:
+            print(f"  WARNING: Skipping {card_id} — {e}")
 
     return full_cards

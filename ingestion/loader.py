@@ -32,6 +32,21 @@ def _parse_date(value: str | None):
         return None
 
 
+def _asset_url(base: str | None) -> str | None:
+    """
+    Resolve a TCGdex asset base URL to a usable image URL.
+
+    TCGdex returns bare base URLs for logos and symbols (no file extension).
+    Append .png so any consumer can use the URL directly without extra logic.
+    """
+    if not base:
+        return None
+    # Already has an extension — return as-is.
+    if "." in base.rsplit("/", 1)[-1]:
+        return base
+    return f"{base}.png"
+
+
 def upsert_set(session: Session, set_data: dict[str, Any]) -> None:
     """Insert or update a set row."""
     session.execute(
@@ -52,8 +67,8 @@ def upsert_set(session: Session, set_data: dict[str, Any]) -> None:
             "series": set_data["serie"]["name"],
             "printed_total": set_data["cardCount"]["official"],
             "release_date": _parse_date(set_data.get("releaseDate")),
-            "symbol_url": set_data.get("symbol"),
-            "logo_url": set_data.get("logo"),
+            "symbol_url": _asset_url(set_data.get("symbol")),
+            "logo_url": _asset_url(set_data.get("logo")),
         },
     )
 

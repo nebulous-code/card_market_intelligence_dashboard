@@ -34,8 +34,8 @@ def main() -> None:
     print("  Fetching set metadata...")
     set_data = get_set(set_id)
 
-    print(f"  Fetching cards for '{set_data['name']}'...")
-    cards = get_cards(set_id)
+    print(f"  Fetching cards for '{set_data['name']}' ({len(set_data.get('cards', []))} cards)...")
+    cards = get_cards(set_data["cards"])
     print(f"  Fetched {len(cards)} cards from TCGdex.")
 
     load_set(set_data, cards)
