@@ -10,13 +10,13 @@ import sys
 from logging.config import fileConfig
 
 from alembic import context
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from sqlalchemy import engine_from_config, pool
 
 # Make the api/ package importable when running Alembic from the api/ directory.
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-load_dotenv()
+load_dotenv(find_dotenv())
 
 # Import Base and all models so Alembic can detect them.
 from database import Base  # noqa: E402

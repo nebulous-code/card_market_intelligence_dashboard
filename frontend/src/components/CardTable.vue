@@ -9,6 +9,7 @@
       :items="rows"
       :loading="loading"
       :items-per-page="25"
+      :sort-by="[{ key: 'number', order: 'asc' }]"
       density="compact"
       hover
     >

@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 import vuetify from "vite-plugin-vuetify";
 
 export default defineConfig({
+  envDir: "..", // Load .env from the project root
   plugins: [
     vue(),
     // Treeshakes Vuetify components automatically.
