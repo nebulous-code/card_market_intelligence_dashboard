@@ -1,4 +1,14 @@
-"""Routes for /cards endpoints."""
+"""
+URL route handlers for card-related API endpoints.
+
+This file handles requests to /cards/{card_id}. It returns a single card
+along with its most recent price snapshot for each available condition
+(normal, holofoil, reverseHolofoil).
+
+Price snapshots are deduplicated here rather than in the database query
+so that the full price history is preserved in the database while clients
+only receive the current prices they actually need.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
@@ -7,34 +17,57 @@ from database import get_db
 from models.card import Card, PriceSnapshot
 from schemas.card import CardDetailResponse, PriceSnapshotResponse
 
+# Create a router for the /cards URL prefix.
 router = APIRouter(prefix="/cards", tags=["cards"])
 
 
 @router.get("/{card_id}", response_model=CardDetailResponse)
 def get_card(card_id: str, db: Session = Depends(get_db)):
     """
-    Return a single card with its latest price snapshot per condition.
+    Return a single card with its latest price per condition.
 
-    Only the most recent snapshot for each condition is returned so the
-    response stays compact while still reflecting current prices.
+    The price_snapshots table is append-only and may contain many rows
+    for the same card if the ingestion script has been run multiple times.
+    This endpoint filters down to only the most recent snapshot for each
+    condition so the response stays compact.
+
+    Args:
+        card_id: The TCGdex card identifier from the URL path (e.g. "base1-4").
+        db: Database session provided by FastAPI's dependency injection.
+
+    Returns:
+        CardDetailResponse: The card object with a latest_prices list
+            containing at most one entry per condition.
+
+    Raises:
+        HTTPException: 404 if no card with the given ID exists in the database.
     """
+    # Load the card and eagerly load its price snapshots in the same query.
+    # joinedload avoids a second round-trip to the database for the snapshots.
+    # Without it, accessing card.price_snapshots would trigger an extra query
+    # for every card requested (known as the N+1 query problem).
     card = (
         db.query(Card)
         .options(joinedload(Card.price_snapshots))
         .filter(Card.id == card_id)
         .first()
     )
+
     if card is None:
         raise HTTPException(status_code=404, detail=f"Card '{card_id}' not found")
 
-    # Deduplicate: keep only the latest snapshot per condition.
+    # Deduplicate snapshots to keep only the latest one per condition.
+    # The relationship is already ordered by captured_at descending, so
+    # the first time we see a condition it is guaranteed to be the newest.
     seen: set[str] = set()
     latest_prices: list[PriceSnapshot] = []
-    for snap in card.price_snapshots:  # already ordered by captured_at desc
+    for snap in card.price_snapshots:
         if snap.condition not in seen:
             seen.add(snap.condition)
             latest_prices.append(snap)
 
+    # Build and return the response object, combining the card fields
+    # with the filtered price list.
     return CardDetailResponse(
         **{col: getattr(card, col) for col in [
             "id", "set_id", "name", "number", "rarity", "supertype", "image_url", "created_at"

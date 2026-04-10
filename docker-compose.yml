@@ -1,25 +1,50 @@
+# Docker Compose configuration for the Pokemon Card Market Intelligence Dashboard.
+#
+# This file defines three services that make up the application:
+#   api        -- the FastAPI backend server
+#   ingestion  -- the data ingestion script (run on demand, not on startup)
+#   frontend   -- the Vue.js development server
+#
+# There is no database service defined here because the database is hosted
+# externally on Neon. All services connect to the same Neon instance using
+# the DATABASE_URL from the .env file.
+#
+# To start the API and frontend:
+#   docker compose up --build
+#
+# To run the ingestion script:
+#   docker compose run ingestion uv run python run.py --set-id base1
+
 services:
+
+  # The FastAPI backend. Handles all data requests from the frontend.
+  # Runs Alembic migrations automatically on startup.
   api:
-    build: ./api
+    build: ./api          # Build using api/Dockerfile
     ports:
-      - "8000:8000"
+      - "8000:8000"       # Expose port 8000 to the host machine
     env_file:
-      - .env
-    restart: unless-stopped
+      - .env              # Load DATABASE_URL and other variables from .env
+    restart: unless-stopped  # Restart if the container crashes
 
+  # The data ingestion script. Fetches card data from TCGdex and writes
+  # it to the database. This service does not start automatically when you
+  # run "docker compose up" -- it must be triggered manually.
   ingestion:
-    build: ./ingestion
+    build: ./ingestion    # Build using ingestion/Dockerfile
     env_file:
       - .env
-    # Does not start automatically. Run on demand:
-    #   docker compose run ingestion python run.py --set-id base1
+    # No restart policy and no ports -- this is a one-shot script.
+    # Run it on demand with:
+    #   docker compose run ingestion uv run python run.py --set-id base1
 
+  # The Vue.js frontend development server.
   frontend:
-    build: ./frontend
+    build: ./frontend     # Build using frontend/Dockerfile
     ports:
-      - "5173:5173"
+      - "5173:5173"       # Expose port 5173 to the host machine
     env_file:
-      - .env
+      - .env              # Provides VITE_API_BASE_URL to the frontend build
     depends_on:
-      - api
+      - api               # Wait for the api service to start first
     restart: unless-stopped
