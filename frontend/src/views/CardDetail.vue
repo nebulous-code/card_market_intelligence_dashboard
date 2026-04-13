@@ -113,9 +113,8 @@
             </span>
             <span v-else class="text-medium-emphasis">---</span>
           </template>
-          <!-- Format timestamp as a readable date -->
-          <template #item.captured_at="{ item }">
-            {{ new Date(item.captured_at).toLocaleDateString() }}
+          <template #item.captured_date="{ item }">
+            {{ item.captured_date }}
           </template>
         </v-data-table>
       </v-card>
@@ -231,11 +230,11 @@ const chartData = computed(() => {
   // Sort oldest-first for the chart (the API already returns them this way,
   // but enforce it here in case filters changed the order).
   const sorted = [...snapshots.value].sort(
-    (a, b) => new Date(a.captured_at) - new Date(b.captured_at)
+    (a, b) => new Date(a.captured_date) - new Date(b.captured_date)
   );
 
   return {
-    labels: sorted.map((s) => new Date(s.captured_at).toLocaleDateString()),
+    labels: sorted.map((s) => s.captured_date),
     datasets: [
       {
         label: "Market Price (USD)",
@@ -280,7 +279,7 @@ const chartOptions = {
 // --- Snapshot table columns ---
 
 const snapshotHeaders = [
-  { title: "Date", key: "captured_at" },
+  { title: "Date", key: "captured_date" },
   { title: "Source", key: "source" },
   { title: "Condition", key: "condition" },
   { title: "Market Price", key: "market_price", align: "end" },

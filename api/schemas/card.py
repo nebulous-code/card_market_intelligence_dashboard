@@ -11,7 +11,7 @@ endpoints. There are four schemas here that build on each other:
                            source and condition
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel
@@ -44,6 +44,7 @@ class PriceSnapshotResponse(BaseModel):
     low_price: Decimal | None
     high_price: Decimal | None
     captured_at: datetime
+    captured_date: date
 
     model_config = {"from_attributes": True}
 

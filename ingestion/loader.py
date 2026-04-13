@@ -353,9 +353,16 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> int:
                         session.execute(
                             text("""
                                 INSERT INTO price_snapshots
-                                    (card_id, source, condition, market_price, low_price, high_price, captured_at)
+                                    (card_id, source, condition, market_price, low_price, high_price,
+                                     captured_at, captured_date)
                                 VALUES
-                                    (:card_id, :source, :condition, :market_price, :low_price, :high_price, NOW())
+                                    (:card_id, :source, :condition, :market_price, :low_price, :high_price,
+                                     NOW(), CURRENT_DATE)
+                                ON CONFLICT (card_id, source, condition, captured_date) DO UPDATE SET
+                                    market_price = EXCLUDED.market_price,
+                                    low_price    = EXCLUDED.low_price,
+                                    high_price   = EXCLUDED.high_price,
+                                    captured_at  = EXCLUDED.captured_at
                             """),
                             row,
                         )
