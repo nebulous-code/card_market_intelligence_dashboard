@@ -108,6 +108,9 @@ def main() -> None:
                 pass  # First run -- no watermark exists yet.
 
         already_backfilled = watermark.get("backfilled", False) if watermark else False
+        start_offset = watermark.get("last_offset", 0) if watermark else 0
+        if start_offset > 0:
+            log.info("Watermark found for set %s at offset=%d -- resuming.", set_id, start_offset)
 
         # Determine whether to include history on this run.
         # On the API tier (include_history=True), pull history on the first run
@@ -118,8 +121,9 @@ def main() -> None:
         try:
             # Pass the display name to PokemonPriceTracker -- it does not
             # recognise TCGdex IDs. The set_id is kept for watermark tracking.
-            ppt_cards, credits_remaining = fetch_prices(
+            ppt_cards, credits_remaining, next_offset = fetch_prices(
                 set_name=set_name,
+                start_offset=start_offset,
                 include_history=run_with_history,
                 history_days=history_days,
                 include_ebay=run_with_ebay,
@@ -143,11 +147,21 @@ def main() -> None:
             sets_skipped += 1
             continue
 
-        # Update the watermark to record a successful run.
-        # backfilled is set to True if we just did a history pull (API tier first run).
+        # Update the watermark with the next offset.
+        # next_offset=0 means the full set completed; any other value means
+        # the run was interrupted and the next run should resume from there.
         with Session(engine) as session:
             with session.begin():
-                set_watermark(session, set_id, backfilled=run_with_history)
+                set_watermark(
+                    session,
+                    set_id,
+                    backfilled=run_with_history,
+                    last_offset=next_offset,
+                )
+        if next_offset == 0:
+            log.info("Set %s fully completed this run.", set_id)
+        else:
+            log.info("Set %s partially completed. Next run resumes at offset=%d.", set_id, next_offset)
         sets_completed += 1
 
         # Check if the daily credit limit is running low. If so, stop now

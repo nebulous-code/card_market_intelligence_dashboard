@@ -37,7 +37,7 @@ def get_watermark(session: Session, set_id: str) -> Optional[dict]:
     """
     row = session.execute(
         text("""
-            SELECT last_ingested_at, backfilled, updated_at
+            SELECT last_ingested_at, backfilled, last_offset, updated_at
             FROM ingestion_watermarks
             WHERE source = :source AND set_id = :set_id
         """),
@@ -50,42 +50,57 @@ def get_watermark(session: Session, set_id: str) -> Optional[dict]:
     return {
         "last_ingested_at": row.last_ingested_at,
         "backfilled": row.backfilled,
+        "last_offset": row.last_offset,
         "updated_at": row.updated_at,
     }
 
 
-def set_watermark(session: Session, set_id: str, backfilled: bool = False) -> None:
+def set_watermark(
+    session: Session,
+    set_id: str,
+    backfilled: bool = False,
+    last_offset: int = 0,
+) -> None:
     """
-    Upsert the watermark for a set, recording a successful ingestion run.
+    Upsert the watermark for a set, recording ingestion progress.
 
-    Sets last_ingested_at to the current UTC time and updates the backfilled
-    flag if provided. Safe to call multiple times -- subsequent calls update
-    the existing row rather than inserting a duplicate.
+    Sets last_ingested_at to the current UTC time and stores the pagination
+    offset reached. When a run completes the full set, pass last_offset=0
+    so the next day's run starts from card 1. When a run is interrupted by
+    a credit limit, pass the offset where pagination stopped so the next
+    run resumes from there rather than re-fetching cards already ingested.
 
     Args:
         session: Active database session. The caller is responsible for
             committing the transaction.
-        set_id: The set ID that was just successfully ingested.
+        set_id: The set ID that was just processed.
         backfilled: Whether the historical backfill is now complete for this
             set. Once set to True, this value is never reset to False.
+        last_offset: Pagination offset to resume from on the next run.
+            0 means start from the beginning (full set completed, or first run).
 
     Returns:
         None
     """
     now = datetime.now(timezone.utc)
-    log.debug("set_watermark set_id=%s backfilled=%s at=%s", set_id, backfilled, now)
+    log.debug(
+        "set_watermark set_id=%s backfilled=%s last_offset=%d at=%s",
+        set_id, backfilled, last_offset, now,
+    )
 
     session.execute(
         text("""
-            INSERT INTO ingestion_watermarks (source, set_id, last_ingested_at, backfilled, updated_at)
-            VALUES (:source, :set_id, :now, :backfilled, :now)
+            INSERT INTO ingestion_watermarks
+                (source, set_id, last_ingested_at, backfilled, last_offset, updated_at)
+            VALUES (:source, :set_id, :now, :backfilled, :last_offset, :now)
             ON CONFLICT (source, set_id) DO UPDATE SET
                 last_ingested_at = EXCLUDED.last_ingested_at,
                 -- Only advance backfilled from False to True, never reverse it.
                 backfilled = ingestion_watermarks.backfilled OR EXCLUDED.backfilled,
+                last_offset = EXCLUDED.last_offset,
                 updated_at = EXCLUDED.updated_at
         """),
-        {"source": SOURCE, "set_id": set_id, "now": now, "backfilled": backfilled},
+        {"source": SOURCE, "set_id": set_id, "now": now, "backfilled": backfilled, "last_offset": last_offset},
     )
 
 

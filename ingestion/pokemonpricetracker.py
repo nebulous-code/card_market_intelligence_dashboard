@@ -48,10 +48,11 @@ def _get_api_key() -> str:
 
 def fetch_prices(
     set_name: str,
+    start_offset: int = 0,
     include_history: bool = False,
     history_days: int = 7,
     include_ebay: bool = False,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, int]:
     """
     Fetch card price data for an entire set from PokemonPriceTracker.
 
@@ -64,6 +65,8 @@ def fetch_prices(
         set_name: The set display name as stored in the database (e.g. "Base Set").
             PokemonPriceTracker does not use TCGdex IDs -- it matches on the
             display name from its own catalogue.
+        start_offset: Pagination offset to start from. Pass the value stored
+            in the watermark to resume a previously interrupted run.
         include_history: Whether to request price history. Free tier returns
             3 days; API tier returns up to 180 days. Costs +1 credit per card.
         history_days: Number of history days to request when include_history
@@ -72,10 +75,12 @@ def fetch_prices(
             only — silently ignored on the free tier. Costs +1 credit per card.
 
     Returns:
-        tuple[list[dict], int]: A tuple of (card_data_list, credits_remaining).
-            card_data_list contains all card objects from the API response.
-            credits_remaining is the value of X-RateLimit-Daily-Remaining from
-            the last response header, or -1 if the header was absent.
+        tuple[list[dict], int, int]: A tuple of
+            (card_data_list, credits_remaining, next_offset).
+            card_data_list contains all card objects fetched this run.
+            credits_remaining is from the last response header (-1 if absent).
+            next_offset is 0 when the full set completed (start fresh next run),
+            or the offset to resume from when interrupted mid-set.
 
     Raises:
         requests.HTTPError: If the API returns a non-2xx status after the
@@ -113,8 +118,11 @@ def fetch_prices(
         params["includeEbay"] = "true"
 
     all_cards: list[dict[str, Any]] = []
-    offset = 0
+    offset = start_offset
     credits_remaining = -1
+
+    if start_offset > 0:
+        log.info("Resuming set=%s from offset=%d", set_name, start_offset)
 
     while True:
         params["offset"] = offset
@@ -126,50 +134,48 @@ def fetch_prices(
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 429:
                 # Daily credit limit hit mid-pagination. Return the cards
-                # collected so far so they are not lost. The remaining pages
-                # will be picked up on the next run when credits reset.
+                # collected so far and the offset to resume from next run.
+                next_offset = offset  # resume from the page that just failed
                 log.warning(
-                    "Daily credit limit hit after %d cards. "
-                    "Returning partial results -- remaining cards will be fetched tomorrow.",
-                    len(all_cards),
+                    "Daily credit limit hit after %d cards (offset=%d). "
+                    "Returning partial results -- resuming from offset=%d tomorrow.",
+                    len(all_cards), offset, next_offset,
                 )
-                return all_cards, 0
+                return all_cards, 0, next_offset
             raise  # Any other HTTP error should propagate normally.
 
         # Read credit consumption headers from every response.
         consumed = response.headers.get("X-API-Calls-Consumed", "?")
         credits_remaining = int(response.headers.get("X-RateLimit-Daily-Remaining", -1))
         log.info(
-            "set=%s credits_consumed=%s credits_remaining=%s",
-            set_name, consumed, credits_remaining,
+            "set=%s offset=%d credits_consumed=%s credits_remaining=%s",
+            set_name, offset, consumed, credits_remaining,
         )
 
         payload = response.json()
         page_cards = payload.get("data", [])
         all_cards.extend(page_cards)
+        offset += len(page_cards)
 
         metadata = payload.get("metadata", {})
         has_more = metadata.get("hasMore", False)
 
         if not has_more:
-            break
+            # Full set completed -- reset offset to 0 so the next daily run
+            # starts from card 1 for a fresh snapshot pass.
+            log.info("Fetched all cards for set=%s (%d total). Offset reset to 0.", set_name, len(all_cards))
+            return all_cards, credits_remaining, 0
 
         # If a test cap is set, simulate credit exhaustion after the first page
         # so the partial-results path is exercised without making more API calls.
         if max_cards is not None:
             log.warning(
-                "PPT_MAX_CARDS=%d reached -- simulating credit exhaustion. "
-                "Returning %d card(s).",
-                max_cards, len(all_cards),
+                "PPT_MAX_CARDS=%d reached -- simulating credit exhaustion at offset=%d.",
+                max_cards, offset,
             )
-            return all_cards, 0
+            return all_cards, 0, offset
 
-        # Advance the offset by the number of cards returned this page.
-        offset += len(page_cards)
-        log.debug("Paginating: fetched %d so far, hasMore=True", len(all_cards))
-
-    log.info("Fetched %d cards for set=%s", len(all_cards), set_name)
-    return all_cards, credits_remaining
+        log.debug("Paginating: fetched %d so far, hasMore=True, next offset=%d", len(all_cards), offset)
 
 
 def _request_with_retry(url: str, **kwargs: Any) -> requests.Response:
