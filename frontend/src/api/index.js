@@ -75,3 +75,21 @@ export async function getCard(cardId) {
   const { data } = await http.get(`/cards/${cardId}`);
   return data;
 }
+
+/**
+ * Fetch the full price history for a single card.
+ *
+ * Returns all price snapshots for the card in chronological order (oldest
+ * first), ready to pass directly to a chart. Optionally filtered by source
+ * and/or condition to reduce the response to a single chart series.
+ *
+ * @param {string} cardId - The TCGdex card identifier (e.g. "base1-4").
+ * @param {Object} [filters={}] - Optional filters.
+ * @param {string} [filters.source] - Price source to filter by (e.g. "tcgplayer", "psa").
+ * @param {string} [filters.condition] - Condition to filter by (e.g. "NM", "PSA-10").
+ * @returns {Promise<Object>} Object with card_id and snapshots array.
+ */
+export async function getPriceHistory(cardId, filters = {}) {
+  const { data } = await http.get(`/cards/${cardId}/price-history`, { params: filters });
+  return data;
+}

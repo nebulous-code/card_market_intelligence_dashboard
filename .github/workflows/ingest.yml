@@ -1,0 +1,58 @@
+# Nightly price ingestion workflow.
+#
+# Runs the PokemonPriceTracker ingestion script every night at 2:00 AM US
+# Eastern (07:00 UTC). Fetches current card prices for all sets in the
+# database and writes them to Neon as price_snapshots rows.
+#
+# Required GitHub Actions secrets (set in repo Settings > Secrets):
+#   DATABASE_URL                    -- Neon connection string
+#   POKEMON_PRICE_TRACKER_API_KEY   -- PokemonPriceTracker API key
+#
+# Optional secrets (defaults to free-tier behaviour if not set):
+#   PPT_INCLUDE_HISTORY             -- "true" to request price history (API tier)
+#   PPT_HISTORY_DAYS                -- number of history days (default 7)
+#   PPT_INCLUDE_EBAY                -- "true" to request eBay graded prices (API tier)
+#
+# The workflow can also be triggered manually from the Actions tab using
+# workflow_dispatch, which is useful for testing or running a backfill.
+
+name: Nightly Price Ingestion
+
+on:
+  schedule:
+    # 07:00 UTC = 02:00 AM US Eastern (UTC-5 in winter, UTC-4 in summer).
+    - cron: "0 7 * * *"
+  workflow_dispatch:  # Allow manual runs from the GitHub Actions UI.
+
+jobs:
+  ingest:
+    name: Run price ingestion
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        working-directory: ingestion
+        run: uv python install
+
+      - name: Install dependencies
+        working-directory: ingestion
+        run: uv sync --frozen
+
+      - name: Run ingestion
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          POKEMON_PRICE_TRACKER_API_KEY: ${{ secrets.POKEMON_PRICE_TRACKER_API_KEY }}
+          # These default to "false" if the secret is not set, giving free-tier behaviour.
+          PPT_INCLUDE_HISTORY: ${{ secrets.PPT_INCLUDE_HISTORY || 'false' }}
+          PPT_HISTORY_DAYS: ${{ secrets.PPT_HISTORY_DAYS || '7' }}
+          PPT_INCLUDE_EBAY: ${{ secrets.PPT_INCLUDE_EBAY || 'false' }}
+        run: uv run python run.py

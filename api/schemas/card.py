@@ -2,11 +2,13 @@
 Pydantic response schemas for card and price snapshot data.
 
 These schemas define the JSON shape that the API returns for card-related
-endpoints. There are three schemas here that build on each other:
+endpoints. There are four schemas here that build on each other:
 
   PriceSnapshotResponse -- a single price record for one card condition
   CardResponse          -- a card without price data (used in list views)
   CardDetailResponse    -- a card with its latest prices attached
+  PriceHistoryResponse  -- full price history for a card, filterable by
+                           source and condition
 """
 
 from datetime import datetime
@@ -94,3 +96,25 @@ class CardDetailResponse(CardResponse):
     """
 
     latest_prices: list[PriceSnapshotResponse]
+
+
+class PriceHistoryResponse(BaseModel):
+    """
+    Full price history for a single card, optionally filtered.
+
+    Returned by GET /cards/{card_id}/price-history. Each item in the
+    snapshots list is one price observation from one ingestion run. The
+    list is ordered by captured_at ascending so charting the data in
+    chronological order requires no client-side sorting.
+
+    Attributes:
+        card_id: The card this history belongs to.
+        snapshots: All matching price snapshots ordered oldest-first.
+            Filtered by source and/or condition when those query parameters
+            are provided.
+    """
+
+    card_id: str
+    snapshots: list[PriceSnapshotResponse]
+
+    model_config = {"from_attributes": True}

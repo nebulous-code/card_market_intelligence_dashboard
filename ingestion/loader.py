@@ -285,3 +285,151 @@ def load_set(set_data: dict[str, Any], cards: list[dict[str, Any]]) -> None:
         # so the calling script knows the ingestion failed.
         log.exception("Transaction failed and was rolled back: %s", e)
         raise
+
+
+def insert_price_snapshots(ppt_cards: list[dict[str, Any]]) -> int:
+    """
+    Insert price snapshots for a batch of cards from PokemonPriceTracker.
+
+    Price snapshots are always appended as new rows -- existing rows are
+    never updated. This preserves the full price history so that trends can
+    be charted over time.
+
+    Each card in ppt_cards may contribute multiple snapshot rows:
+      - One row per TCGPlayer condition (NM, LP, MP, etc.) from prices.*
+      - One row per eBay/graded grade (PSA-10, BGS-9.5, etc.) from ebay.*
+        if the ebay field is present (API tier only).
+    If includeHistory was set in the API call, one row is also inserted for
+    each historical data point in priceHistory.
+
+    Cards whose tcgPlayerId does not exist in the cards table are skipped
+    with a warning -- this can happen if the set has not been ingested via
+    TCGdex yet.
+
+    Args:
+        ppt_cards: The list of card objects from the PokemonPriceTracker
+            API response (the "data" array).
+
+    Returns:
+        int: The total number of snapshot rows inserted.
+
+    Raises:
+        Exception: Re-raises any exception after logging and rolling back.
+    """
+    total_inserted = 0
+
+    try:
+        with Session(engine) as session:
+            with session.begin():
+                for card in ppt_cards:
+                    card_id = card.get("tcgPlayerId")
+                    if not card_id:
+                        log.warning("Skipping card with no tcgPlayerId: %s", card.get("name"))
+                        continue
+
+                    rows = _build_snapshot_rows(card_id, card)
+                    for row in rows:
+                        session.execute(
+                            text("""
+                                INSERT INTO price_snapshots
+                                    (card_id, source, condition, market_price, low_price, high_price, captured_at)
+                                VALUES
+                                    (:card_id, :source, :condition, :market_price, :low_price, :high_price, NOW())
+                            """),
+                            row,
+                        )
+                    total_inserted += len(rows)
+
+        log.info("Inserted %d price snapshot rows", total_inserted)
+        return total_inserted
+
+    except Exception as e:
+        log.exception("Price snapshot insert failed and was rolled back: %s", e)
+        raise
+
+
+def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, Any]]:
+    """
+    Convert a single PokemonPriceTracker card object into snapshot row dicts.
+
+    Produces one row for each available price data point:
+      - Current TCGPlayer prices (prices.market / low / high) keyed by condition
+      - Historical TCGPlayer prices from priceHistory (market only, no low/high)
+      - eBay/graded prices from ebay.* when present (API tier)
+
+    Args:
+        card_id: The tcgPlayerId value for this card.
+        card: The card object from the PokemonPriceTracker API response.
+
+    Returns:
+        list[dict]: One dict per row, ready to pass as SQL parameters.
+    """
+    rows: list[dict[str, Any]] = []
+
+    # --- Current TCGPlayer prices ---
+    # The API returns a flat prices dict with keys like "market", "low", "mid",
+    # "high". We store the current snapshot as condition="NM" (the standard
+    # ungraded near-mint condition) using source="tcgplayer".
+    prices = card.get("prices")
+    if prices:
+        rows.append({
+            "card_id": card_id,
+            "source": "tcgplayer",
+            "condition": "NM",
+            "market_price": prices.get("market"),
+            "low_price": prices.get("low"),
+            "high_price": prices.get("high"),
+        })
+
+    # --- Historical TCGPlayer prices ---
+    # priceHistory is a list of {"date": "YYYY-MM-DD", "market": float} objects.
+    # Each historical point is stored as a separate row with market_price only
+    # (low/high are not available in history). We keep them under source="tcgplayer"
+    # so they appear in the same chart series as current prices.
+    for point in card.get("priceHistory", []):
+        market = point.get("market")
+        if market is None:
+            continue
+        rows.append({
+            "card_id": card_id,
+            "source": "tcgplayer",
+            "condition": "NM",
+            "market_price": market,
+            "low_price": None,
+            "high_price": None,
+        })
+
+    # --- eBay / graded prices (API tier only) ---
+    # ebay is a dict with keys like "psa10", "psa9", "bgs95" etc. Each value
+    # is {"avg": float}. We store each grade as a separate row with the grade
+    # as the condition and the grading company as the source.
+    ebay = card.get("ebay", {})
+    grade_map = {
+        # key in API response -> (source, condition label)
+        "psa10": ("psa", "PSA-10"),
+        "psa9": ("psa", "PSA-9"),
+        "psa8": ("psa", "PSA-8"),
+        "bgs10": ("bgs", "BGS-10"),
+        "bgs95": ("bgs", "BGS-9.5"),
+        "bgs9": ("bgs", "BGS-9"),
+        "cgc10": ("cgc", "CGC-10"),
+        "cgc95": ("cgc", "CGC-9.5"),
+        "cgc9": ("cgc", "CGC-9"),
+    }
+    for api_key, (source, condition_label) in grade_map.items():
+        grade_data = ebay.get(api_key)
+        if not grade_data:
+            continue
+        avg = grade_data.get("avg")
+        if avg is None:
+            continue
+        rows.append({
+            "card_id": card_id,
+            "source": source,
+            "condition": condition_label,
+            "market_price": avg,
+            "low_price": None,
+            "high_price": None,
+        })
+
+    return rows
