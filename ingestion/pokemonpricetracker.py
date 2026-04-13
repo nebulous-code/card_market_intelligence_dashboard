@@ -85,10 +85,26 @@ def fetch_prices(
     api_key = _get_api_key()
     headers = {"Authorization": f"Bearer {api_key}"}
 
+    # Use a page size that stays within the free tier daily budget (100 credits).
+    # fetchAllInSet=true is avoided because the API pre-calculates the full set
+    # cost and rejects the request with 429 if credits are insufficient -- even
+    # if we only want a partial set. Plain pagination fetches as many pages as
+    # credits allow and stops gracefully when the budget runs out.
+    PAGE_SIZE = 50
+
+    # PPT_MAX_CARDS caps the total number of cards fetched per set. Used during
+    # development to verify the pipeline without burning through API credits.
+    # Remove this env var (or leave it unset) for normal production runs.
+    max_cards = int(os.environ["PPT_MAX_CARDS"]) if os.environ.get("PPT_MAX_CARDS") else None
+    if max_cards is not None:
+        log.warning("PPT_MAX_CARDS=%d is set -- limiting fetch to %d card(s) for testing.", max_cards, max_cards)
+        PAGE_SIZE = max_cards
+
     params: dict[str, Any] = {
         "set": set_name,
-        "fetchAllInSet": "true",
-        "limit": 200,  # request the maximum page size to minimise round-trips
+        "limit": PAGE_SIZE,
+        "sortBy": "cardNumber",
+        "sortOrder": "asc",
     }
     if include_history:
         params["includeHistory"] = "true"
@@ -104,8 +120,21 @@ def fetch_prices(
         params["offset"] = offset
         log.debug("GET %s/cards params=%s", BASE_URL, params)
 
-        response = _request_with_retry(f"{BASE_URL}/cards", headers=headers, params=params)
-        response.raise_for_status()
+        try:
+            response = _request_with_retry(f"{BASE_URL}/cards", headers=headers, params=params)
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 429:
+                # Daily credit limit hit mid-pagination. Return the cards
+                # collected so far so they are not lost. The remaining pages
+                # will be picked up on the next run when credits reset.
+                log.warning(
+                    "Daily credit limit hit after %d cards. "
+                    "Returning partial results -- remaining cards will be fetched tomorrow.",
+                    len(all_cards),
+                )
+                return all_cards, 0
+            raise  # Any other HTTP error should propagate normally.
 
         # Read credit consumption headers from every response.
         consumed = response.headers.get("X-API-Calls-Consumed", "?")
@@ -124,6 +153,16 @@ def fetch_prices(
 
         if not has_more:
             break
+
+        # If a test cap is set, simulate credit exhaustion after the first page
+        # so the partial-results path is exercised without making more API calls.
+        if max_cards is not None:
+            log.warning(
+                "PPT_MAX_CARDS=%d reached -- simulating credit exhaustion. "
+                "Returning %d card(s).",
+                max_cards, len(all_cards),
+            )
+            return all_cards, 0
 
         # Advance the offset by the number of cards returned this page.
         offset += len(page_cards)
@@ -156,10 +195,25 @@ def _request_with_retry(url: str, **kwargs: Any) -> requests.Response:
     response = requests.get(url, **kwargs)
 
     if response.status_code == 429:
-        log.warning(
-            "Rate limited (429). Waiting %ds before retrying...",
-            RATE_LIMIT_BACKOFF_SECONDS,
-        )
+        try:
+            body = response.json()
+        except Exception:
+            body = response.text
+
+        # Distinguish daily credit exhaustion from a per-minute rate limit.
+        # Retrying after 60 seconds won't help if the daily budget is gone --
+        # credits reset at midnight UTC, not after a backoff period.
+        error_str = str(body).lower()
+        if "daily credit limit" in error_str or "insufficient api credits" in error_str:
+            log.error(
+                "Daily credit limit exceeded. Response: %s. "
+                "Credits reset at midnight UTC -- re-run this script tomorrow.",
+                body,
+            )
+            response.raise_for_status()  # Raise immediately, no retry.
+
+        log.warning("Minute rate limit hit (429). Response body: %s", body)
+        log.warning("Waiting %ds before retrying...", RATE_LIMIT_BACKOFF_SECONDS)
         time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
         response = requests.get(url, **kwargs)
 

@@ -136,7 +136,7 @@ def main() -> None:
 
         # Write price snapshots for this set.
         try:
-            inserted = insert_price_snapshots(ppt_cards)
+            inserted = insert_price_snapshots(ppt_cards, set_id)
             log.info("Inserted %d snapshots for set %s.", inserted, set_id)
         except Exception as e:
             log.error("Failed to insert snapshots for set %s: %s. Skipping watermark.", set_id, e)

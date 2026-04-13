@@ -287,7 +287,7 @@ def load_set(set_data: dict[str, Any], cards: list[dict[str, Any]]) -> None:
         raise
 
 
-def insert_price_snapshots(ppt_cards: list[dict[str, Any]]) -> int:
+def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> int:
     """
     Insert price snapshots for a batch of cards from PokemonPriceTracker.
 
@@ -295,20 +295,20 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]]) -> int:
     never updated. This preserves the full price history so that trends can
     be charted over time.
 
-    Each card in ppt_cards may contribute multiple snapshot rows:
-      - One row per TCGPlayer condition (NM, LP, MP, etc.) from prices.*
-      - One row per eBay/graded grade (PSA-10, BGS-9.5, etc.) from ebay.*
-        if the ebay field is present (API tier only).
-    If includeHistory was set in the API call, one row is also inserted for
-    each historical data point in priceHistory.
+    PokemonPriceTracker uses numeric TCGPlayer IDs (e.g. 42350) which do not
+    match the TCGdex IDs stored in our cards table (e.g. "base1-4"). Cards are
+    matched to our database by card number within the set -- PPT's cardNumber
+    field (e.g. "4") corresponds to our cards.number column.
 
-    Cards whose tcgPlayerId does not exist in the cards table are skipped
-    with a warning -- this can happen if the set has not been ingested via
-    TCGdex yet.
+    Cards whose card number cannot be found in our database are skipped with
+    a warning. This can happen if the PPT set contains promo or variant cards
+    that were not ingested via TCGdex.
 
     Args:
         ppt_cards: The list of card objects from the PokemonPriceTracker
             API response (the "data" array).
+        set_id: The TCGdex set ID (e.g. "base1") used to scope the card
+            number lookup to the correct set.
 
     Returns:
         int: The total number of snapshot rows inserted.
@@ -321,14 +321,35 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]]) -> int:
     try:
         with Session(engine) as session:
             with session.begin():
+                # Build a mapping of card number -> our card ID for this set.
+                # PPT uses its own numeric IDs; we resolve to our TCGdex IDs
+                # by matching on card number within the set.
+                rows_db = session.execute(
+                    text("SELECT id, number FROM cards WHERE set_id = :set_id"),
+                    {"set_id": set_id},
+                ).fetchall()
+                number_to_id = {row.number: row.id for row in rows_db}
+                log.debug("Loaded %d card number mappings for set %s", len(number_to_id), set_id)
+
                 for card in ppt_cards:
-                    card_id = card.get("tcgPlayerId")
-                    if not card_id:
-                        log.warning("Skipping card with no tcgPlayerId: %s", card.get("name"))
+                    # PPT returns card numbers as "001/102" (zero-padded, with total).
+                    # Our database stores only the plain number (e.g. "1").
+                    raw = str(card.get("cardNumber", "")).strip().split("/")[0]
+                    card_number = raw.lstrip("0") or "0"
+                    if not card_number:
+                        log.warning("Skipping PPT card with no cardNumber: %s", card.get("name"))
                         continue
 
-                    rows = _build_snapshot_rows(card_id, card)
-                    for row in rows:
+                    card_id = number_to_id.get(card_number)
+                    if not card_id:
+                        log.warning(
+                            "Skipping PPT card '%s' (number=%s) -- not found in cards table for set %s",
+                            card.get("name"), card_number, set_id,
+                        )
+                        continue
+
+                    snapshot_rows = _build_snapshot_rows(card_id, card)
+                    for row in snapshot_rows:
                         session.execute(
                             text("""
                                 INSERT INTO price_snapshots
@@ -338,7 +359,7 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]]) -> int:
                             """),
                             row,
                         )
-                    total_inserted += len(rows)
+                    total_inserted += len(snapshot_rows)
 
         log.info("Inserted %d price snapshot rows", total_inserted)
         return total_inserted
