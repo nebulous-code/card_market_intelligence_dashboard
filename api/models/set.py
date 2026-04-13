@@ -9,7 +9,7 @@ Each Set can have many Cards associated with it. SQLAlchemy manages that
 relationship automatically through the cards attribute.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import Date, Integer, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -49,10 +49,10 @@ class Set(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     series: Mapped[str] = mapped_column(Text, nullable=False)
     printed_total: Mapped[int] = mapped_column(Integer, nullable=False)
-    release_date: Mapped[datetime] = mapped_column(Date, nullable=True)
+    release_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     symbol_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 
     # Relationship to the Card model. back_populates="set" tells SQLAlchemy
     # that Card.set points back to this side of the relationship.

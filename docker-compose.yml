@@ -48,3 +48,8 @@ services:
     depends_on:
       - api               # Wait for the api service to start first
     restart: unless-stopped
+    # Override the default CMD to bind on all interfaces inside the container.
+    # vite.config.js uses host: "127.0.0.1" for local dev (avoids the Windows
+    # firewall prompt), but Docker's port forwarding requires 0.0.0.0.
+    # The --host flag takes precedence over the config file.
+    command: npm run dev -- --host 0.0.0.0

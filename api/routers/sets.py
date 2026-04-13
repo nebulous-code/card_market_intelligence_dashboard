@@ -40,7 +40,9 @@ def list_sets(db: Session = Depends(get_db)):
             sets have been ingested yet.
     """
     # Query all sets and sort them newest first.
-    return db.query(Set).order_by(Set.release_date.desc()).all()
+    # nulls_last() ensures sets without a release date sort to the bottom
+    # rather than the top, which is PostgreSQL's default for DESC ordering.
+    return db.query(Set).order_by(Set.release_date.desc().nulls_last()).all()
 
 
 @router.get("/{set_id}", response_model=SetResponse)

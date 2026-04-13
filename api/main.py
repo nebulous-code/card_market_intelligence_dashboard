@@ -13,6 +13,7 @@ of itself.
 
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,12 +21,54 @@ from fastapi.middleware.cors import CORSMiddleware
 # Import the two sets of URL routes: one for sets, one for cards.
 from routers import cards, sets
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Manage application startup and shutdown tasks.
+
+    FastAPI calls this context manager once when the server starts. Code
+    before the ``yield`` runs at startup; code after it runs at shutdown.
+    Using ``lifespan`` is the modern replacement for the deprecated
+    ``@app.on_event("startup")`` and ``@app.on_event("shutdown")`` decorators.
+
+    Raises:
+        RuntimeError: Raised at startup if the Alembic migration fails, which
+            prevents the server from accepting requests against a broken schema.
+    """
+    # --- Startup ---
+    # Apply any pending database migrations before the server accepts requests.
+    # "upgrade head" brings the schema up to the latest migration version.
+    result = subprocess.run(
+        ["alembic", "upgrade", "head"],
+        capture_output=True,
+        text=True,
+    )
+
+    # A non-zero return code means the migration failed.
+    # Print the error output and stop the server rather than continuing
+    # with a potentially broken or outdated database schema.
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr)
+        raise RuntimeError("Alembic migration failed -- see stderr above.")
+
+    # Print whatever Alembic reported so it shows up in the server logs.
+    print(result.stdout)
+
+    yield  # Server is now running and accepting requests.
+
+    # --- Shutdown ---
+    # Nothing to clean up currently. Add teardown logic here if needed
+    # (e.g. closing connection pools, flushing caches).
+
+
 # Create the FastAPI application. The title and description appear in the
 # automatically generated interactive documentation at /docs.
 app = FastAPI(
     title="Pokemon Card Market Intelligence API",
     description="Serves card metadata and price snapshots for the dashboard.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Configure Cross-Origin Resource Sharing (CORS).
@@ -49,42 +92,6 @@ app.add_middleware(
 # Each router is a collection of related URL endpoints defined in its own file.
 app.include_router(sets.router)   # handles /sets and /sets/{id}/cards
 app.include_router(cards.router)  # handles /cards/{id}
-
-
-@app.on_event("startup")
-def run_migrations():
-    """
-    Apply any pending database migrations before the server accepts requests.
-
-    This function is called automatically by FastAPI at startup. It runs
-    the Alembic tool to compare the current database schema against the
-    migration scripts and applies anything that has not been applied yet.
-
-    Think of it like a software update check that runs every time the
-    server boots -- if everything is already up to date, it does nothing.
-
-    Raises:
-        RuntimeError: Raised if the migration command exits with a non-zero
-            return code, which means something went wrong. The server will
-            refuse to start so it does not run against a broken schema.
-    """
-    # Call the Alembic command line tool as a subprocess.
-    # "upgrade head" means: bring the database up to the latest version.
-    result = subprocess.run(
-        ["alembic", "upgrade", "head"],
-        capture_output=True,
-        text=True,
-    )
-
-    # A non-zero return code means the migration failed.
-    # Print the error output and stop the server rather than continuing
-    # with a potentially broken or outdated database schema.
-    if result.returncode != 0:
-        print(result.stderr, file=sys.stderr)
-        raise RuntimeError("Alembic migration failed -- see stderr above.")
-
-    # Print whatever Alembic reported so it shows up in the server logs.
-    print(result.stdout)
 
 
 @app.get("/", include_in_schema=False)

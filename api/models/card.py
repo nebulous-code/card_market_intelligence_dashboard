@@ -55,7 +55,7 @@ class Card(Base):
     rarity: Mapped[str | None] = mapped_column(Text, nullable=True)
     supertype: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 
     # Relationship back to the parent set.
     set: Mapped["Set"] = relationship("Set", back_populates="cards")  # noqa: F821
@@ -101,7 +101,7 @@ class PriceSnapshot(Base):
     market_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     low_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     high_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
-    captured_at: Mapped[datetime] = mapped_column(default=func.now(), nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 
     # Relationship back to the parent card.
     card: Mapped["Card"] = relationship("Card", back_populates="price_snapshots")
