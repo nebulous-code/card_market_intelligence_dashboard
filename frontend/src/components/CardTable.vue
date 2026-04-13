@@ -38,6 +38,18 @@
         <span v-else class="text-medium-emphasis">---</span>
       </template>
 
+      <!-- Details button navigates to the card detail page. -->
+      <template #item.actions="{ item }">
+        <v-btn
+          :to="`/cards/${item.id}`"
+          size="small"
+          variant="tonal"
+          color="primary"
+        >
+          Details
+        </v-btn>
+      </template>
+
     </v-data-table>
   </v-card>
 </template>
@@ -48,10 +60,11 @@
  *
  * Displays all cards for the selected set in a paginated, sortable table.
  * Columns: card image thumbnail, card number, name, supertype, rarity,
- * and market price.
+ * market price, and a Details button linking to the card detail page.
  *
- * The market price shown is the normal condition price if available,
- * falling back to holofoil. Cards with no price data show "---".
+ * The market price shown is the NM condition price from TCGPlayer. Cards
+ * with no price data show "---". The Details button navigates to
+ * /cards/:cardId where the full price history chart is shown.
  *
  * Props:
  *   cards          - Array of card objects from the API.
@@ -97,6 +110,7 @@ const headers = [
   { title: "Supertype", key: "supertype" },
   { title: "Rarity", key: "rarity" },
   { title: "Market Price", key: "market_price", align: "end" },
+  { title: "", key: "actions", sortable: false, align: "end", width: "100px" },
 ];
 
 /**
@@ -110,9 +124,10 @@ const rows = computed(() =>
   props.cards.map((card) => {
     const prices = props.pricesByCardId[card.id] ?? [];
 
-    // Prefer the normal condition price; fall back to holofoil.
-    // Most Base Set cards have one or the other but not always both.
+    // Prefer the TCGPlayer NM price (Milestone 2 source).
+    // Fall back to legacy Milestone 1 condition labels for backwards compatibility.
     const snap =
+      prices.find((p) => p.condition === "NM") ??
       prices.find((p) => p.condition === "normal") ??
       prices.find((p) => p.condition === "holofoil") ??
       null;

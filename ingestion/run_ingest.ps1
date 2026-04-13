@@ -20,4 +20,4 @@ param(
     [string]$SetId
 )
 
-uv run python run.py --set-id $SetId
+uv run python run_ingest.py --set-id $SetId
