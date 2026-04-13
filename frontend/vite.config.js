@@ -35,11 +35,11 @@ export default defineConfig({
 
     port: 5173,
 
-    // Proxy requests to /api through to the backend API server.
-    // This means a request from the frontend to /api/sets is forwarded to
-    // http://localhost:8000/api/sets, which avoids cross-origin request
-    // issues during development. Note: the API routes do not currently use
-    // an /api prefix, so this proxy is a placeholder for future use.
+    // Proxy requests whose path starts with /api to the backend server.
+    // Only requests that explicitly begin with /api are forwarded -- the
+    // current API routes have no /api prefix, so this proxy is not active
+    // in practice. It is wired up now so that adding an /api prefix to the
+    // API in a future milestone requires no frontend config changes.
     proxy: {
       "/api": "http://localhost:8000",
     },

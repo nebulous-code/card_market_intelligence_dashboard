@@ -19,12 +19,14 @@ import os
 from datetime import datetime
 from typing import Any
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-# Load environment variables from the .env file at the project root.
-load_dotenv()
+# Load environment variables by walking up the directory tree to find .env.
+# find_dotenv() searches from this file's location upward, so the script
+# works regardless of which directory it is run from or invoked via Docker.
+load_dotenv(find_dotenv())
 
 # Read the database connection string and create the engine.
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -178,6 +180,8 @@ def upsert_set(session: Session, set_data: dict[str, Any]) -> None:
                 release_date = EXCLUDED.release_date,
                 symbol_url = EXCLUDED.symbol_url,
                 logo_url = EXCLUDED.logo_url
+                -- created_at is intentionally omitted: we never overwrite the
+                -- original insertion timestamp when re-ingesting the same set.
         """),
         params,
     )
@@ -226,6 +230,8 @@ def upsert_card(session: Session, card_data: dict[str, Any]) -> None:
                 rarity = EXCLUDED.rarity,
                 supertype = EXCLUDED.supertype,
                 image_url = EXCLUDED.image_url
+                -- created_at is intentionally omitted: we never overwrite the
+                -- original insertion timestamp when re-ingesting the same card.
         """),
         params,
     )

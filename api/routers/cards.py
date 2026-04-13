@@ -56,6 +56,10 @@ def get_card(card_id: str, db: Session = Depends(get_db)):
     if card is None:
         raise HTTPException(status_code=404, detail=f"Card '{card_id}' not found")
 
+    # NOTE: latest_prices will always be empty in Milestone 1 because price
+    # ingestion has not been implemented yet. It will be populated in
+    # Milestone 2 via the eBay API. This is expected, not a bug.
+
     # Deduplicate snapshots to keep only the latest one per condition.
     # The relationship is already ordered by captured_at descending, so
     # the first time we see a condition it is guaranteed to be the newest.
@@ -66,11 +70,10 @@ def get_card(card_id: str, db: Session = Depends(get_db)):
             seen.add(snap.condition)
             latest_prices.append(snap)
 
-    # Build and return the response object, combining the card fields
-    # with the filtered price list.
-    return CardDetailResponse(
-        **{col: getattr(card, col) for col in [
-            "id", "set_id", "name", "number", "rarity", "supertype", "image_url", "created_at"
-        ]},
-        latest_prices=[PriceSnapshotResponse.model_validate(s) for s in latest_prices],
+    # Build and return the response object. model_validate reads all fields
+    # declared on CardDetailResponse directly from the ORM object, so adding
+    # a new column to the model and schema is sufficient -- this line never
+    # needs to change.
+    return CardDetailResponse.model_validate(
+        {**card.__dict__, "latest_prices": [PriceSnapshotResponse.model_validate(s) for s in latest_prices]}
     )

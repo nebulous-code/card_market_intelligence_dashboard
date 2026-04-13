@@ -9,9 +9,12 @@ API base URL: https://api.tcgdex.net/v2/en
 Full API reference: docs/tcgdex_api_specs.md
 """
 
+import logging
 from typing import Any
 
 import requests
+
+log = logging.getLogger(__name__)
 
 # The base URL for all API requests. The "en" segment specifies English
 # as the language for card names and descriptions.
@@ -81,7 +84,7 @@ def get_cards(brief_cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         # Log each card fetch with a progress counter so the operator can
         # see that the script is running and how far along it is.
-        print(f"  [{i}/{len(brief_cards)}] Fetching card: {card_id} ({brief.get('name', '?')})")
+        log.info("[%d/%d] Fetching card: %s (%s)", i, len(brief_cards), card_id, brief.get("name", "?"))
 
         try:
             response = requests.get(f"{BASE_URL}/cards/{card_id}", timeout=30)
@@ -91,11 +94,11 @@ def get_cards(brief_cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
         except requests.HTTPError as e:
             # A 404 means TCGdex does not have detail data for this card.
             # Skip it and continue rather than aborting the entire run.
-            print(f"  WARNING: Skipping {card_id} -- HTTP {e.response.status_code}")
+            log.warning("Skipping %s -- HTTP %s", card_id, e.response.status_code)
 
         except requests.RequestException as e:
             # A network error (timeout, connection refused, etc.).
             # Skip this card and continue.
-            print(f"  WARNING: Skipping {card_id} -- {e}")
+            log.warning("Skipping %s -- %s", card_id, e)
 
     return full_cards
