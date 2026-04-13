@@ -119,15 +119,22 @@ watch(selectedSetId, async (setId) => {
   try {
     // Step 1: Fetch the card list for this set.
     cards.value = await getCardsForSet(setId);
-
-    // Step 2: Fetch latest prices for all cards in one request.
-    // This replaces the previous pattern of calling GET /cards/{id} once per
-    // card, which would fire 100+ parallel requests for a full set and exhaust
-    // the database connection pool.
-    pricesByCardId.value = await getSetCardPrices(setId);
-
   } catch (e) {
     error.value = `Failed to load cards for set '${setId}'.`;
+    return;
+  } finally {
+    loadingCards.value = false;
+  }
+
+  // Step 2: Fetch latest prices for all cards in one request.
+  // This is kept separate from the card fetch so a price failure does not
+  // prevent the card table from rendering -- cards show with empty prices
+  // rather than the whole view failing.
+  try {
+    pricesByCardId.value = await getSetCardPrices(setId);
+  } catch (e) {
+    console.warn("Failed to load prices for set:", setId, e);
+    pricesByCardId.value = {};
   } finally {
     loadingCards.value = false;
   }
