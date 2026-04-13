@@ -13,6 +13,7 @@ of itself.
 
 import subprocess
 import sys
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -76,13 +77,19 @@ app = FastAPI(
 # By default, browsers refuse to let a web page on one address (the frontend
 # at port 5173) make requests to a different address (this API at port 8000).
 # This is a browser security feature called the same-origin policy.
-#
+
+origins = [
+    "http://localhost:5173", 
+    "http://127.0.0.1:5173",
+    os.environ.get("FRONTEND_URL",""),
+]
+
 # This middleware tells the browser it is safe to allow those requests.
 # Both localhost and 127.0.0.1 are listed because they refer to the same
 # machine but browsers treat them as different origins.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[o for o in origins if o],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
