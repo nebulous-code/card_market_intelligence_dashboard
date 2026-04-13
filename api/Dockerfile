@@ -21,6 +21,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # All subsequent commands run relative to this path.
 WORKDIR /app
 
+# Test print to validate that the dockerfile is being hit.
+RUN echo "=== Docker build is running ==="
+
 # Copy only the dependency files first and install before copying the
 # application code. Docker caches each instruction as a layer. By
 # installing dependencies in a separate layer, Docker can reuse the
