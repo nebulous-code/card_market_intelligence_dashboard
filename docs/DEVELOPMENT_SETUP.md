@@ -22,6 +22,7 @@ This project supports two development modes to accommodate machines with and wit
 
 - **Node.js** (v20+) — install via [Scoop](https://scoop.sh): `scoop install nodejs`
 - **Python** (3.11+) — install via Scoop: `scoop install python`
+- **uv** — fast Python package manager: `scoop install uv` or `pip install uv`
 - A **Neon** account: [neon.tech](https://neon.tech) — the free tier is sufficient
 
 ### Mode A Only (Containers)
@@ -89,10 +90,10 @@ podman-compose up --build
 
 ```bash
 # Docker
-docker compose run ingestion python run.py --set-id base1
+docker compose run ingestion uv run python run.py --set-id base1
 
 # Podman
-podman-compose run ingestion python run.py --set-id base1
+podman-compose run ingestion uv run python run.py --set-id base1
 ```
 
 **Stop all services:**
@@ -121,16 +122,8 @@ This mode runs the API and frontend natively using a Python venv and Node. No ad
 
 ```bash
 cd api
-python -m venv .venv
-
-# Windows (PowerShell)
-.venv\Scripts\Activate.ps1
-
-# macOS / Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
+uv sync
+uv run uvicorn main:app --reload --port 8000
 ```
 
 ### Step 2 — Run the Frontend
@@ -145,16 +138,8 @@ npm run dev
 
 ```bash
 cd ingestion
-python -m venv .venv
-
-# Windows (PowerShell)
-.venv\Scripts\Activate.ps1
-
-# macOS / Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
-python run.py --set-id base1
+uv sync
+uv run python run.py --set-id base1
 ```
 
 Services and ports are the same as Mode A.
@@ -166,9 +151,9 @@ Services and ports are the same as Mode A.
 Migrations run automatically on API startup. To generate a new migration after modifying a SQLAlchemy model:
 
 ```bash
-# From the api/ directory, with the venv active (or inside the container)
-alembic revision --autogenerate -m "description of change"
-alembic upgrade head
+# From the api/ directory
+uv run alembic revision --autogenerate -m "description of change"
+uv run alembic upgrade head
 ```
 
 ---
