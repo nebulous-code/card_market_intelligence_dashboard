@@ -34,11 +34,18 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 # it, which prevents errors caused by stale connections that have been
 # dropped by the database server (common with cloud-hosted databases).
 engine = create_engine(
-    DATABASE_URL, 
+    DATABASE_URL,
     pool_pre_ping=True,
     pool_size=2,
     max_overflow=2,
     pool_recycle=300,
+    connect_args={
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+        "connect_timeout": 10,
+    },
 )
 
 # Create a session factory.
