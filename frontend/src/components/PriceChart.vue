@@ -7,9 +7,7 @@
       <!-- Render the bar chart if there is price data to show. -->
       <Bar v-if="chartData" :data="chartData" :options="chartOptions" style="max-height: 320px" />
 
-      <!-- Fallback message when no price data exists for this set.
-           This is expected in Milestone 1 since price ingestion has not been
-           implemented yet. It will be replaced with real data in Milestone 2. -->
+      <!-- Fallback message when no price data exists for this set. -->
       <v-alert v-else type="info" variant="tonal" density="compact">
         No price data available for this set.
       </v-alert>
@@ -90,9 +88,9 @@ const chartData = computed(() => {
     const rarity = card.rarity ?? "Unknown";
     const prices = props.pricesByCardId[card.id] ?? [];
 
-    // Prefer the normal condition price; fall back to holofoil.
-    // These are the two most common conditions for Base Set cards.
-    const snap = prices.find((p) => p.condition === "normal" || p.condition === "holofoil");
+    // Use NM (Near Mint) — the condition label used by PokemonPriceTracker
+    // for standard ungraded TCGPlayer prices.
+    const snap = prices.find((p) => p.condition === "NM");
     if (!snap?.market_price) continue; // Skip cards with no price data.
 
     // Add this card's price to the running total for its rarity group.
