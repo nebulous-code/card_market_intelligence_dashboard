@@ -1,0 +1,10 @@
+[project]
+name = "card-market-ingestion"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "requests==2.32.2",
+    "sqlalchemy==2.0.30",
+    "psycopg2-binary==2.9.9",
+    "python-dotenv==1.0.1",
+]
