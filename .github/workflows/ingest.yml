@@ -13,6 +13,10 @@
 #   PPT_HISTORY_DAYS                -- number of history days (default 7)
 #   PPT_INCLUDE_EBAY                -- "true" to request eBay graded prices (API tier)
 #
+# Optional variables (set in repo Settings > Variables, not Secrets):
+#   PPT_MAX_CARDS                   -- cap cards fetched per run to reserve daytime credits.
+#                                      Unset (or 0) means no cap (full nightly run).
+#
 # The workflow can also be triggered manually from the Actions tab using
 # workflow_dispatch, which is useful for testing or running a backfill.
 
@@ -55,4 +59,8 @@ jobs:
           PPT_INCLUDE_HISTORY: ${{ secrets.PPT_INCLUDE_HISTORY || 'false' }}
           PPT_HISTORY_DAYS: ${{ secrets.PPT_HISTORY_DAYS || '7' }}
           PPT_INCLUDE_EBAY: ${{ secrets.PPT_INCLUDE_EBAY || 'false' }}
+          # Cap cards per run to reserve daytime credits for testing.
+          # Set this in repo Settings > Variables (not Secrets) to a number like 50.
+          # Leave unset or set to 0 for a full uncapped run.
+          PPT_MAX_CARDS: ${{ vars.PPT_MAX_CARDS || '0' }}
         run: uv run python run.py

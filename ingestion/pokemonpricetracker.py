@@ -100,7 +100,8 @@ def fetch_prices(
     # PPT_MAX_CARDS caps the total number of cards fetched per set. Used during
     # development to verify the pipeline without burning through API credits.
     # Remove this env var (or leave it unset) for normal production runs.
-    max_cards = int(os.environ["PPT_MAX_CARDS"]) if os.environ.get("PPT_MAX_CARDS") else None
+    _max_cards_raw = int(os.environ.get("PPT_MAX_CARDS") or 0)
+    max_cards = _max_cards_raw if _max_cards_raw > 0 else None
     if max_cards is not None:
         log.warning("PPT_MAX_CARDS=%d is set -- limiting fetch to %d card(s) for testing.", max_cards, max_cards)
         PAGE_SIZE = max_cards
