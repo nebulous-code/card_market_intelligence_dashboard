@@ -77,6 +77,21 @@ export async function getCard(cardId) {
 }
 
 /**
+ * Fetch the latest prices for all cards in a set in a single request.
+ *
+ * Returns a map of card ID to that card's latest price snapshots. Used by
+ * the Dashboard instead of calling getCard() once per card, which would
+ * fire 100+ parallel requests and exhaust the database connection pool.
+ *
+ * @param {string} setId - The TCGdex set identifier (e.g. "base1").
+ * @returns {Promise<Object>} Object with a prices map: { [cardId]: snapshot[] }
+ */
+export async function getSetCardPrices(setId) {
+  const { data } = await http.get(`/sets/${setId}/cards/prices`);
+  return data.prices;
+}
+
+/**
  * Fetch the full price history for a single card.
  *
  * Returns all price snapshots for the card in chronological order (oldest

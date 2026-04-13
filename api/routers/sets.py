@@ -11,9 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models.card import Card
 from models.set import Set
-from schemas.card import CardResponse
+from models.card import Card, PriceSnapshot
+from schemas.card import CardResponse, PriceSnapshotResponse, SetCardPricesResponse
 from schemas.set import SetResponse
 
 # Create a router for the /sets URL prefix. All routes defined in this file
@@ -106,3 +106,60 @@ def list_cards_for_set(set_id: str, db: Session = Depends(get_db)):
         .all()
     )
     return cards
+
+
+@router.get("/{set_id}/cards/prices", response_model=SetCardPricesResponse)
+def get_prices_for_set(set_id: str, db: Session = Depends(get_db)):
+    """
+    Return the latest price snapshot per condition for every card in a set.
+
+    This is a batch alternative to calling GET /cards/{id} once per card.
+    The dashboard uses this endpoint to avoid firing 100+ parallel requests
+    when a set is selected, which would exhaust the database connection pool.
+
+    The query fetches all snapshots for the set in one round-trip, then
+    deduplicates them in Python to keep only the most recent per (card, condition)
+    pair -- the same logic as GET /cards/{id} but applied across the whole set.
+
+    Args:
+        set_id: The TCGdex set identifier from the URL path (e.g. "base1").
+        db: Database session provided by dependency injection.
+
+    Returns:
+        SetCardPricesResponse: A dict mapping card ID to its latest prices list.
+            Cards with no price data are omitted from the dict.
+
+    Raises:
+        HTTPException: 404 if no set with the given ID exists in the database.
+    """
+    set_record = db.query(Set).filter(Set.id == set_id).first()
+    if set_record is None:
+        raise HTTPException(status_code=404, detail=f"Set '{set_id}' not found")
+
+    # Fetch all snapshots for the set in one query, ordered newest-first so
+    # the deduplication loop below always sees the most recent row first.
+    snapshots = (
+        db.query(PriceSnapshot)
+        .join(Card, PriceSnapshot.card_id == Card.id)
+        .filter(Card.set_id == set_id)
+        .order_by(PriceSnapshot.card_id, PriceSnapshot.captured_at.desc())
+        .all()
+    )
+
+    # Deduplicate: keep only the latest snapshot per (card_id, condition).
+    seen: dict[str, set[str]] = {}
+    prices: dict[str, list] = {}
+    for snap in snapshots:
+        cid = snap.card_id
+        if cid not in seen:
+            seen[cid] = set()
+        if snap.condition not in seen[cid]:
+            seen[cid].add(snap.condition)
+            prices.setdefault(cid, []).append(snap)
+
+    return SetCardPricesResponse(
+        prices={
+            cid: [PriceSnapshotResponse.model_validate(s) for s in snaps]
+            for cid, snaps in prices.items()
+        }
+    )

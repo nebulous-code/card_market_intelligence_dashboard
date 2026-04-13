@@ -64,7 +64,7 @@
  */
 
 import { computed, onMounted, ref, watch } from "vue";
-import { getCard, getCardsForSet, getSets } from "../api/index.js";
+import { getCardsForSet, getSetCardPrices, getSets } from "../api/index.js";
 import CardTable from "../components/CardTable.vue";
 import PriceChart from "../components/PriceChart.vue";
 import SetSummaryCard from "../components/SetSummaryCard.vue";
@@ -120,20 +120,11 @@ watch(selectedSetId, async (setId) => {
     // Step 1: Fetch the card list for this set.
     cards.value = await getCardsForSet(setId);
 
-    // Step 2: Fetch prices for all cards in parallel using Promise.allSettled.
-    // allSettled (rather than Promise.all) means one failed price request will
-    // not prevent the others from completing -- we just skip that card.
-    const results = await Promise.allSettled(cards.value.map((c) => getCard(c.id)));
-
-    // Build the prices map from the settled results.
-    // Fulfilled results contain the price data; rejected results are skipped.
-    const prices = {};
-    results.forEach((result, i) => {
-      if (result.status === "fulfilled") {
-        prices[cards.value[i].id] = result.value.latest_prices ?? [];
-      }
-    });
-    pricesByCardId.value = prices;
+    // Step 2: Fetch latest prices for all cards in one request.
+    // This replaces the previous pattern of calling GET /cards/{id} once per
+    // card, which would fire 100+ parallel requests for a full set and exhaust
+    // the database connection pool.
+    pricesByCardId.value = await getSetCardPrices(setId);
 
   } catch (e) {
     error.value = `Failed to load cards for set '${setId}'.`;

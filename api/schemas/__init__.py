@@ -6,7 +6,7 @@ Route handlers can import from here rather than from individual schema
 files if they need multiple schemas at once.
 """
 
-from schemas.card import CardDetailResponse, CardResponse, PriceHistoryResponse, PriceSnapshotResponse
+from schemas.card import CardDetailResponse, CardResponse, PriceHistoryResponse, PriceSnapshotResponse, SetCardPricesResponse
 from schemas.set import SetResponse
 
-__all__ = ["SetResponse", "CardResponse", "CardDetailResponse", "PriceSnapshotResponse", "PriceHistoryResponse"]
+__all__ = ["SetResponse", "CardResponse", "CardDetailResponse", "PriceSnapshotResponse", "PriceHistoryResponse", "SetCardPricesResponse"]
