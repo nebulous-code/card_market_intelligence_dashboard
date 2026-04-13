@@ -20,4 +20,4 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-uv run python run.py --set-id "$1"
+uv run python run_ingest.py --set-id "$1"

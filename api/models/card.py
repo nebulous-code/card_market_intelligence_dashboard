@@ -9,10 +9,10 @@ than updating existing ones. This preserves the full price history so
 that trends can be analyzed over time in later milestones.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Integer, Numeric, Text, func
+from sqlalchemy import Date, ForeignKey, Integer, Numeric, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -89,6 +89,9 @@ class PriceSnapshot(Base):
         low_price: The lowest recent sale price in USD. Nullable.
         high_price: The highest recent sale price in USD. Nullable.
         captured_at: Timestamp of when this price was recorded.
+        captured_date: Date component of captured_at. Used as the deduplication
+            key so re-running the ingestion on the same day updates the existing
+            row rather than inserting a duplicate.
         card: The Card object this snapshot belongs to. Virtual attribute.
     """
 
@@ -102,6 +105,7 @@ class PriceSnapshot(Base):
     low_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     high_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     captured_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+    captured_date: Mapped[date] = mapped_column(Date, nullable=False)
 
     # Relationship back to the parent card.
     card: Mapped["Card"] = relationship("Card", back_populates="price_snapshots")

@@ -33,7 +33,20 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 # pool_pre_ping=True tells SQLAlchemy to test each connection before using
 # it, which prevents errors caused by stale connections that have been
 # dropped by the database server (common with cloud-hosted databases).
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=10,
+    pool_recycle=300,
+    connect_args={
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+        "connect_timeout": 10,
+    },
+)
 
 # Create a session factory.
 # A session is a short-lived workspace for database operations. Each web

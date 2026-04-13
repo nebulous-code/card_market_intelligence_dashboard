@@ -2,14 +2,18 @@
 Pydantic response schemas for card and price snapshot data.
 
 These schemas define the JSON shape that the API returns for card-related
-endpoints. There are three schemas here that build on each other:
+endpoints. There are five schemas here that build on each other:
 
   PriceSnapshotResponse -- a single price record for one card condition
   CardResponse          -- a card without price data (used in list views)
   CardDetailResponse    -- a card with its latest prices attached
+  PriceHistoryResponse  -- full price history for a card, filterable by
+                           source and condition
+  SetCardPricesResponse -- latest prices for all cards in a set, keyed by
+                           card ID (used by the dashboard to avoid N+1 requests)
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel
@@ -42,6 +46,7 @@ class PriceSnapshotResponse(BaseModel):
     low_price: Decimal | None
     high_price: Decimal | None
     captured_at: datetime
+    captured_date: date
 
     model_config = {"from_attributes": True}
 
@@ -94,3 +99,43 @@ class CardDetailResponse(CardResponse):
     """
 
     latest_prices: list[PriceSnapshotResponse]
+
+
+class PriceHistoryResponse(BaseModel):
+    """
+    Full price history for a single card, optionally filtered.
+
+    Returned by GET /cards/{card_id}/price-history. Each item in the
+    snapshots list is one price observation from one ingestion run. The
+    list is ordered by captured_at ascending so charting the data in
+    chronological order requires no client-side sorting.
+
+    Attributes:
+        card_id: The card this history belongs to.
+        snapshots: All matching price snapshots ordered oldest-first.
+            Filtered by source and/or condition when those query parameters
+            are provided.
+    """
+
+    card_id: str
+    snapshots: list[PriceSnapshotResponse]
+
+    model_config = {"from_attributes": True}
+
+
+class SetCardPricesResponse(BaseModel):
+    """
+    Latest prices for every card in a set, returned in a single request.
+
+    Used by the dashboard to avoid making one GET /cards/{id} request per
+    card (which would be 100+ parallel requests for a full set). Instead,
+    the dashboard calls GET /sets/{set_id}/cards/prices once and receives
+    a map it can look up locally.
+
+    Attributes:
+        prices: Dict mapping card ID (e.g. "base1-4") to that card's list
+            of latest price snapshots, one per condition. Cards with no
+            price data are omitted from the map.
+    """
+
+    prices: dict[str, list[PriceSnapshotResponse]]
