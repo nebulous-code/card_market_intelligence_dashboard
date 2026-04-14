@@ -207,7 +207,7 @@ Steps 5 and 6 use `if: always()` so they run even when the ingestion script exit
 
 ---
 
-### TC01 — Single log file captures all modules
+### [x] TC01 — Single log file captures all modules
 
 **Steps:**
 1. Delete `ingestion/ingestion.log` if it exists
@@ -221,7 +221,7 @@ python run.py --set-id base1
 
 ---
 
-### TC02 — DEBUG messages appear when log level is DEBUG
+### [x] TC02 — DEBUG messages appear when log level is DEBUG
 
 **Steps:**
 ```bash
@@ -232,7 +232,7 @@ LOG_LEVEL=DEBUG python run.py --set-id base1
 
 ---
 
-### TC03 — WARNING appears for unmatched card
+### [x] TC03 — WARNING appears for unmatched card
 
 **Steps:**
 1. Temporarily insert a fake PPT card number that won't match anything. This can be simulated by temporarily adding a card number that doesn't exist in the database to the matching logic, or by checking existing skip warnings in a normal run.
@@ -242,7 +242,7 @@ LOG_LEVEL=DEBUG python run.py --set-id base1
 
 ---
 
-### TC04 — Per-set summary line appears at INFO level
+### [x] TC04 — Per-set summary line appears at INFO level
 
 **Steps:**
 ```bash
@@ -253,7 +253,7 @@ python run.py --set-id base1
 
 ---
 
-### TC05 — Run-level summary appears at end of log
+### [x] TC05 — Run-level summary appears at end of log
 
 **Steps:**
 ```bash
@@ -264,7 +264,7 @@ python run.py --set-id base1
 
 ---
 
-### TC06 — Log file is uploaded as artifact in GitHub Actions
+### [ ] TC06 — Log file is uploaded as artifact in GitHub Actions
 
 **Steps:**
 1. Trigger the workflow manually from the GitHub Actions tab
@@ -277,7 +277,7 @@ python run.py --set-id base1
 
 ---
 
-### TC07 — Email is received after successful run
+### [x] TC07 — Email is received after successful run
 
 **Steps:**
 1. Ensure `GMAIL_USERNAME`, `GMAIL_APP_PASSWORD`, and `NOTIFY_EMAIL` secrets are set in GitHub
@@ -291,7 +291,7 @@ python run.py --set-id base1
 
 ---
 
-### TC08 — Email is received even when ingestion fails
+### [x] TC08 — Email is received even when ingestion fails
 
 **Steps:**
 1. Temporarily introduce a failure — e.g. set `DATABASE_URL` to an invalid value in the GitHub Actions secrets, or add a deliberate syntax error to `run.py` on a test branch
@@ -304,7 +304,7 @@ python run.py --set-id base1
 
 ---
 
-### TC09 — Email is not sent when running locally
+### [x] TC09 — Email is not sent when running locally
 
 **Steps:**
 ```bash
@@ -315,7 +315,7 @@ python run.py --set-id base1
 
 ---
 
-### TC10 — Gmail App Password setup
+### [x] TC10 — Gmail App Password setup
 
 This is a setup verification step, not a code test.
 
