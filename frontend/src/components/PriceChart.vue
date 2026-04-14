@@ -44,6 +44,7 @@ import {
 } from "chart.js";
 import { computed } from "vue";
 import { Bar } from "vue-chartjs";
+import { formatCurrency } from "../utils/formatters.js";
 
 // Register all the Chart.js components this chart needs.
 // Chart.js uses tree-shaking so only the pieces you explicitly register
@@ -126,16 +127,14 @@ const chartOptions = {
     legend: { display: false }, // The single dataset label is redundant.
     tooltip: {
       callbacks: {
-        // Format tooltip values as dollar amounts.
-        label: (ctx) => ` $${ctx.parsed.y}`,
+        label: (ctx) => ` ${formatCurrency(ctx.parsed.y)}`,
       },
     },
   },
   scales: {
     y: {
       ticks: {
-        // Format Y axis tick labels as dollar amounts.
-        callback: (val) => `$${val}`,
+        callback: (val) => formatCurrency(val),
       },
     },
   },

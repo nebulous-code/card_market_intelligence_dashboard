@@ -33,9 +33,9 @@
 
       <!-- Custom rendering for the price column: format as a dollar amount. -->
       <template #item.market_price="{ item }">
-        <span v-if="item.market_price != null">${{ Number(item.market_price).toFixed(2) }}</span>
-        <!-- Show a dash for cards with no price data rather than null or 0. -->
-        <span v-else class="text-medium-emphasis">---</span>
+        <span :class="item.market_price == null ? 'text-medium-emphasis' : ''">
+          {{ formatCurrency(item.market_price) }}
+        </span>
       </template>
 
       <!-- Details button navigates to the card detail page. -->
@@ -74,6 +74,7 @@
  */
 
 import { computed } from "vue";
+import { formatCurrency } from "../utils/formatters.js";
 
 const props = defineProps({
   /**

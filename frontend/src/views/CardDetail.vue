@@ -3,12 +3,12 @@
 
     <!-- Back button -->
     <v-btn
-      :to="'/'"
+      :to="'/sets'"
       variant="text"
       prepend-icon="mdi-arrow-left"
       class="mb-4"
     >
-      Back to Dashboard
+      Back to Sets
     </v-btn>
 
     <!-- Loading state -->
@@ -106,15 +106,13 @@
           :sort-by="[{ key: 'captured_at', order: 'desc' }]"
           density="compact"
         >
-          <!-- Format market price as dollars -->
           <template #item.market_price="{ item }">
-            <span v-if="item.market_price != null">
-              ${{ Number(item.market_price).toFixed(2) }}
+            <span :class="item.market_price == null ? 'text-medium-emphasis' : ''">
+              {{ formatCurrency(item.market_price) }}
             </span>
-            <span v-else class="text-medium-emphasis">---</span>
           </template>
           <template #item.captured_date="{ item }">
-            {{ item.captured_date }}
+            {{ formatDate(item.captured_date) }}
           </template>
         </v-data-table>
       </v-card>
@@ -151,6 +149,7 @@ import { computed, onMounted, ref } from "vue";
 import { Line } from "vue-chartjs";
 import { useRoute } from "vue-router";
 import { getCard, getPriceHistory } from "../api/index.js";
+import { formatCurrency, formatDate } from "../utils/formatters.js";
 
 // Register Chart.js components needed for a line chart.
 ChartJS.register(Title, Tooltip, Legend, LineElement, PointElement, CategoryScale, LinearScale);
@@ -257,14 +256,14 @@ const chartOptions = {
     legend: { display: false },
     tooltip: {
       callbacks: {
-        label: (ctx) => ` $${Number(ctx.parsed.y).toFixed(2)}`,
+        label: (ctx) => ` ${formatCurrency(ctx.parsed.y)}`,
       },
     },
   },
   scales: {
     y: {
       ticks: {
-        callback: (val) => `$${val}`,
+        callback: (val) => formatCurrency(val),
       },
     },
     x: {

@@ -25,7 +25,7 @@
         <!-- Total card count. -->
         <v-col cols="auto" class="text-right">
           <div class="text-body-2 text-medium-emphasis">Cards</div>
-          <div class="text-h6">{{ set.printed_total }}</div>
+          <div class="text-h6">{{ formatNumber(set.printed_total) }}</div>
         </v-col>
 
         <!-- Release date, formatted for readability. -->
@@ -51,6 +51,8 @@
  *         in which case nothing is rendered.
  */
 
+import { formatDate, formatNumber } from "../utils/formatters.js";
+
 const props = defineProps({
   /**
    * The set object to display. Expected to have: name, series,
@@ -61,22 +63,4 @@ const props = defineProps({
     default: null,
   },
 });
-
-/**
- * Format a date string into a human-readable format.
- *
- * The API returns dates as ISO strings (e.g. "1999-01-09"). This function
- * converts them to a more readable form like "Jan 9, 1999".
- *
- * @param {string|null} dateStr - ISO date string or null.
- * @returns {string} Formatted date string, or "---" if no date is available.
- */
-function formatDate(dateStr) {
-  if (!dateStr) return "---";
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 </script>
