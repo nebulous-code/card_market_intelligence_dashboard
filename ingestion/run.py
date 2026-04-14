@@ -40,11 +40,12 @@ configure_logging()
 # Load .env before importing any local modules that read env vars at import time.
 load_dotenv(find_dotenv())
 
-from loader import insert_price_snapshots          # noqa: E402
-from pokemonpricetracker import credits_exhausted, fetch_prices  # noqa: E402
-from watermark import get_all_sets, set_watermark  # noqa: E402
-from sqlalchemy import create_engine                # noqa: E402
-from sqlalchemy.orm import Session                  # noqa: E402
+from loader import insert_price_snapshots                                    # noqa: E402
+from pokemonpricetracker import credits_exhausted, fetch_prices              # noqa: E402
+from set_resolver import SOURCE_PPT, SetIdentifierNotFoundError, resolve_identifier  # noqa: E402
+from watermark import get_all_sets, set_watermark                            # noqa: E402
+from sqlalchemy import create_engine                                         # noqa: E402
+from sqlalchemy.orm import Session                                           # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -104,6 +105,16 @@ def main() -> None:
         set_name = set_info["name"]
         log.info("--- Processing set: %s (%s) ---", set_id, set_name)
 
+        # Resolve the PPT display name through the set_identifiers table.
+        # This fails loudly if the mapping is missing rather than silently
+        # calling the API with a wrong name and getting 0 results.
+        try:
+            ppt_name = resolve_identifier(set_id, SOURCE_PPT)
+        except SetIdentifierNotFoundError as e:
+            log.error("%s", e)
+            sets_skipped += 1
+            continue
+
         # Check whether this set needs a backfill or just a current-price run.
         with Session(engine) as session:
             watermark = None
@@ -125,10 +136,8 @@ def main() -> None:
         run_with_ebay = include_ebay
 
         try:
-            # Pass the display name to PokemonPriceTracker -- it does not
-            # recognise TCGdex IDs. The set_id is kept for watermark tracking.
             ppt_cards, credits_remaining, next_offset = fetch_prices(
-                set_name=set_name,
+                set_name=ppt_name,
                 start_offset=start_offset,
                 include_history=run_with_history,
                 history_days=history_days,

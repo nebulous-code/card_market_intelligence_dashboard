@@ -9,6 +9,7 @@ or apply migrations correctly.
 
 from models.card import Card, PriceSnapshot
 from models.set import Set
+from models.set_identifier import SetIdentifier
 from models.watermark import IngestionWatermark
 
-__all__ = ["Set", "Card", "PriceSnapshot", "IngestionWatermark"]
+__all__ = ["Set", "Card", "PriceSnapshot", "IngestionWatermark", "SetIdentifier"]

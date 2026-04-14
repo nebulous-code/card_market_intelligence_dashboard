@@ -28,12 +28,9 @@ configure_logging()
 load_dotenv(find_dotenv())
 
 from loader import load_set    # noqa: E402
+from set_resolver import SOURCE_TCGDEX, SetIdentifierNotFoundError, resolve_identifier  # noqa: E402
 from tcgdex import get_cards, get_set  # noqa: E402
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
 log = logging.getLogger(__name__)
 
 
@@ -42,16 +39,27 @@ def main() -> None:
     parser.add_argument(
         "--set-id",
         required=True,
-        help="TCGdex set identifier to ingest (e.g. base1, base2, base3).",
+        help="Any recognizable set identifier (e.g. base1, 'Base Set').",
     )
     args = parser.parse_args()
-    set_id: str = args.set_id
+    search_term: str = args.set_id
 
-    log.info("Fetching set metadata for: %s", set_id)
+    # Resolve the canonical TCGdex ID through the set_identifiers table.
+    # This ensures we always use the exact ID TCGdex expects, and fails loudly
+    # if the mapping is missing rather than silently calling the API with a
+    # wrong identifier.
     try:
-        set_data = get_set(set_id)
+        tcgdex_id = resolve_identifier(search_term, SOURCE_TCGDEX)
+    except SetIdentifierNotFoundError as e:
+        log.error("%s", e)
+        sys.exit(1)
+
+    log.info("Resolved '%s' → TCGdex ID '%s'", search_term, tcgdex_id)
+    log.info("Fetching set metadata for: %s", tcgdex_id)
+    try:
+        set_data = get_set(tcgdex_id)
     except Exception as e:
-        log.error("Failed to fetch set '%s' from TCGdex: %s", set_id, e)
+        log.error("Failed to fetch set '%s' from TCGdex: %s", tcgdex_id, e)
         sys.exit(1)
 
     brief_cards = set_data.get("cards", [])
