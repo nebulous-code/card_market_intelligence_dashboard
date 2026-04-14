@@ -100,6 +100,13 @@ def main() -> None:
     sets_completed = 0
     sets_skipped = 0
 
+    # Accumulators for the run-level summary logged at the end.
+    run_total_matched = 0
+    run_total_skipped = 0
+    run_total_errors = 0
+    run_set_lines: list[str] = []      # per-set breakdown lines for the summary
+    run_warning_lines: list[str] = []  # skipped-card detail lines for the summary
+
     for set_info in sets:
         set_id = set_info["id"]
         set_name = set_info["name"]
@@ -155,12 +162,38 @@ def main() -> None:
 
         # Write price snapshots for this set.
         try:
-            inserted = insert_price_snapshots(ppt_cards, set_id)
-            log.info("Inserted %d snapshots for set %s.", inserted, set_id)
+            stats = insert_price_snapshots(ppt_cards, set_id)
         except Exception as e:
             log.error("Failed to insert snapshots for set %s: %s. Skipping watermark.", set_id, e)
             sets_skipped += 1
             continue
+
+        # Log the per-set summary block.
+        skipped_detail = ", ".join(
+            f"{cid} ({name})" for cid, name, _ in stats["skipped_cards"]
+        ) or "none"
+        sep = "─" * 45
+        log.info(
+            "\n%s\n%s ingestion complete\n"
+            "  PPT cards returned : %d\n"
+            "  Matched            : %d\n"
+            "  Skipped            : %d\n"
+            "  Errors             : %d\n"
+            "  Skipped cards      : %s\n%s",
+            sep, set_name,
+            stats["ppt_total"], stats["matched"], stats["skipped"], stats["errors"],
+            skipped_detail, sep,
+        )
+
+        # Accumulate into run-level totals.
+        run_total_matched += stats["matched"]
+        run_total_skipped += stats["skipped"]
+        run_total_errors  += stats["errors"]
+        run_set_lines.append(
+            f"  {set_name:<12} {stats['matched']}/{stats['ppt_total']} matched, {stats['skipped']} skipped"
+        )
+        for cid, name, reason in stats["skipped_cards"]:
+            run_warning_lines.append(f"  [{set_id}] {cid} ({name}) — {reason}")
 
         # Update the watermark with the next offset.
         # next_offset=0 means the full set completed; any other value means
@@ -189,10 +222,43 @@ def main() -> None:
             )
             break
 
-    log.info(
-        "Price ingestion run complete. sets_completed=%d sets_skipped=%d",
-        sets_completed, sets_skipped,
+    # --- Run-level summary ---
+    from datetime import date as _date
+    run_date = _date.today().isoformat()
+
+    if run_total_errors > 0:
+        overall_status = "❌ Failed"
+    elif run_total_skipped > 0:
+        overall_status = "⚠️ Warnings"
+    else:
+        overall_status = "✅ Success"
+
+    warnings_section = "\n".join(run_warning_lines) if run_warning_lines else "  (none)"
+    per_set_section = "\n".join(run_set_lines) if run_set_lines else "  (no sets processed)"
+
+    sep = "═" * 45
+    summary = (
+        f"\n{sep}\n"
+        f"Nightly ingestion complete — {run_date}\n"
+        f"  Sets processed : {sets_completed}\n"
+        f"  Total matched  : {run_total_matched}\n"
+        f"  Total skipped  : {run_total_skipped}\n"
+        f"  Total errors   : {run_total_errors}\n"
+        f"  Overall status : {overall_status}\n"
+        f"\nPer-set breakdown:\n{per_set_section}\n"
+        f"\nWarnings:\n{warnings_section}\n"
+        f"{sep}"
     )
+    log.info("%s", summary)
+
+    # Write summary variables to GitHub Actions environment file when running
+    # in CI. This is a no-op locally because GITHUB_ENV is not set there.
+    github_env = os.environ.get("GITHUB_ENV")
+    if github_env:
+        with open(github_env, "a", encoding="utf-8") as f:
+            f.write(f"RUN_DATE={run_date}\n")
+            f.write(f"RUN_STATUS={overall_status}\n")
+            f.write(f"EMAIL_BODY<<EOF\n{summary}\nEOF\n")
 
 
 if __name__ == "__main__":

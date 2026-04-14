@@ -37,6 +37,9 @@ def configure_logging(log_file: str = "ingestion.log") -> None:
     """
     Configure the root logger with a console handler and a file handler.
 
+    The log level is read from the LOG_LEVEL environment variable (default INFO).
+    Set LOG_LEVEL=DEBUG to see per-card MATCHED lines during ingestion.
+
     Safe to call more than once -- duplicate handlers are not added if the
     root logger already has handlers (e.g. if a module was imported before
     this function was called).
@@ -45,13 +48,17 @@ def configure_logging(log_file: str = "ingestion.log") -> None:
         log_file: Path to the log file. Defaults to "ingestion.log" in the
             current working directory (the ingestion/ folder).
     """
+    import os
+
     root = logging.getLogger()
 
     if root.handlers:
         # Already configured -- don't add duplicate handlers.
         return
 
-    root.setLevel(logging.DEBUG)
+    level_name = os.environ.get("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    root.setLevel(level)
 
     # File handler: plain text, no color codes (they appear as garbage in files).
     file_handler = logging.FileHandler(log_file, encoding="utf-8")

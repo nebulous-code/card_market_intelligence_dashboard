@@ -17,6 +17,13 @@
 #   PPT_MAX_CARDS                   -- cap cards fetched per run to reserve daytime credits.
 #                                      Unset (or 0) means no cap (full nightly run).
 #
+# Email notification secrets (set in repo Settings > Secrets):
+#   GMAIL_USERNAME      -- Gmail address used to send the summary email
+#   GMAIL_APP_PASSWORD  -- Gmail App Password (NOT your regular password).
+#                          Generate at myaccount.google.com → Security → App Passwords.
+#                          Requires 2-factor authentication to be enabled first.
+#   NOTIFY_EMAIL        -- Address to send the summary to (can equal GMAIL_USERNAME)
+#
 # The workflow can also be triggered manually from the Actions tab using
 # workflow_dispatch, which is useful for testing or running a backfill.
 
@@ -32,6 +39,12 @@ jobs:
   ingest:
     name: Run price ingestion
     runs-on: ubuntu-latest
+    # Default values used if the ingestion script crashes before writing to GITHUB_ENV.
+    # The script overwrites these on a normal run; they act as a fallback for hard failures.
+    env:
+      RUN_DATE: unknown
+      RUN_STATUS: "❌ Failed (script did not complete)"
+      EMAIL_BODY: "The ingestion script crashed before generating a summary. Check the log artifact for details."
 
     steps:
       - name: Check out repository
@@ -64,3 +77,25 @@ jobs:
           # Leave unset or set to 0 for a full uncapped run.
           PPT_MAX_CARDS: ${{ vars.PPT_MAX_CARDS || '0' }}
         run: uv run python run.py
+
+      - name: Upload ingestion log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingestion-log-${{ github.run_id }}
+          path: ingestion/ingestion.log
+          retention-days: 7
+
+      - name: Send ingestion summary email
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "[Card Market] Nightly Ingestion — ${{ env.RUN_DATE }} — ${{ env.RUN_STATUS }}"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: Card Market Ingestion <${{ secrets.GMAIL_USERNAME }}>
+          body: ${{ env.EMAIL_BODY }}

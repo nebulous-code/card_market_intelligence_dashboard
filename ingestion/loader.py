@@ -240,68 +240,103 @@ def load_set(set_data: dict[str, Any], cards: list[dict[str, Any]]) -> None:
         raise
 
 
-def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> int:
+def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> dict[str, Any]:
     """
     Insert price snapshots for a batch of cards from PokemonPriceTracker.
 
-    Price snapshots are always appended as new rows -- existing rows are
-    never updated. This preserves the full price history so that trends can
-    be charted over time.
+    Price snapshots use ON CONFLICT DO UPDATE so re-running on the same day
+    updates the existing row rather than inserting a duplicate.
 
-    PokemonPriceTracker uses numeric TCGPlayer IDs (e.g. 42350) which do not
-    match the TCGdex IDs stored in our cards table (e.g. "base1-4"). Cards are
-    matched to our database by card number within the set -- PPT's cardNumber
-    field (e.g. "4") corresponds to our cards.number column.
-
-    Cards whose card number cannot be found in our database are skipped with
-    a warning. This can happen if the PPT set contains promo or variant cards
-    that were not ingested via TCGdex.
+    PokemonPriceTracker uses numeric TCGPlayer IDs which do not match the
+    TCGdex IDs stored in our cards table. Cards are matched by card number
+    within the set -- PPT's cardNumber field corresponds to our cards.number
+    column after stripping zero-padding and the "/total" suffix.
 
     Args:
-        ppt_cards: The list of card objects from the PokemonPriceTracker
-            API response (the "data" array).
-        set_id: The TCGdex set ID (e.g. "base1") used to scope the card
-            number lookup to the correct set.
+        ppt_cards: The list of card objects from the PokemonPriceTracker API.
+        set_id: The TCGdex set ID (e.g. "base1") used to scope card lookups.
 
     Returns:
-        int: The total number of snapshot rows inserted.
+        dict with keys:
+            ppt_total  -- number of PPT cards processed
+            matched    -- cards successfully matched and inserted
+            skipped    -- cards skipped (no match or no price data)
+            errors     -- cards that raised an unexpected exception
+            skipped_cards -- list of (card_id_or_number, name, reason) tuples
 
     Raises:
-        Exception: Re-raises any exception after logging and rolling back.
+        Exception: Re-raises any exception from the database transaction.
     """
-    total_inserted = 0
+    stats: dict[str, Any] = {
+        "ppt_total": len(ppt_cards),
+        "matched": 0,
+        "skipped": 0,
+        "errors": 0,
+        "skipped_cards": [],  # list of (card_id_or_number, name, reason)
+    }
 
     try:
         with Session(engine) as session:
             with session.begin():
-                # Build a mapping of card number -> our card ID for this set.
-                # PPT uses its own numeric IDs; we resolve to our TCGdex IDs
-                # by matching on card number within the set.
+                # Build a mapping of card number -> (card_id, card_name).
+                # Also keep a sorted list of all known numbers for nearby-number hints.
                 rows_db = session.execute(
-                    text("SELECT id, number FROM cards WHERE set_id = :set_id"),
+                    text("SELECT id, number, name FROM cards WHERE set_id = :set_id"),
                     {"set_id": set_id},
                 ).fetchall()
-                number_to_id = {row.number: row.id for row in rows_db}
-                log.debug("Loaded %d card number mappings for set %s", len(number_to_id), set_id)
+                number_to_info: dict[str, tuple[str, str]] = {
+                    row.number: (row.id, row.name) for row in rows_db
+                }
+                # Pre-sort numeric keys for nearby-number lookup on misses.
+                all_numbers_sorted = sorted(
+                    (n for n in number_to_info if n.isdigit()),
+                    key=int,
+                )
+                log.debug("Loaded %d card number mappings for set %s", len(number_to_info), set_id)
 
                 for card in ppt_cards:
-                    # PPT returns card numbers as "001/102" (zero-padded, with total).
-                    # Our database stores only the plain number (e.g. "1").
+                    card_name = card.get("name", "?")
                     raw = str(card.get("cardNumber", "")).strip().split("/")[0]
                     card_number = raw.lstrip("0") or "0"
+
                     if not card_number:
-                        log.warning("Skipping PPT card with no cardNumber: %s", card.get("name"))
+                        log.warning("[%s] SKIPPED (no number): '%s' has no cardNumber", set_id, card_name)
+                        stats["skipped"] += 1
+                        stats["skipped_cards"].append((raw or "?", card_name, "no cardNumber"))
                         continue
 
-                    card_id = number_to_id.get(card_number)
-                    if not card_id:
+                    info = number_to_info.get(card_number)
+                    if not info:
+                        nearby = _nearby_numbers(card_number, all_numbers_sorted, number_to_info)
+                        nearby_str = ", ".join(f"{n} ({number_to_info[n][1]})" for n in nearby)
                         log.warning(
-                            "Skipping PPT card '%s' (number=%s) -- not found in cards table for set %s",
-                            card.get("name"), card_number, set_id,
+                            "[%s] SKIPPED (no match): '%s' PPT#%s — searched for '%s', "
+                            "not found in cards table.\n  Cards with nearby numbers: %s",
+                            set_id, card_name, raw, card_number,
+                            nearby_str or "none",
                         )
+                        stats["skipped"] += 1
+                        stats["skipped_cards"].append((card_number, card_name, "no match"))
                         continue
 
-                    snapshot_rows = _build_snapshot_rows(card_id, card)
+                    card_id, db_name = info
+
+                    try:
+                        snapshot_rows = _build_snapshot_rows(card_id, card)
+                    except Exception as exc:
+                        log.error("[%s] ERROR matching '%s' PPT#%s: %s", set_id, card_name, raw, exc)
+                        stats["errors"] += 1
+                        continue
+
+                    if not snapshot_rows:
+                        log.warning(
+                            "[%s] SKIPPED (no price): '%s' PPT#%s matched %s but PPT returned no price data",
+                            set_id, card_name, raw, card_id,
+                        )
+                        stats["skipped"] += 1
+                        stats["skipped_cards"].append((card_id, card_name, "no price data"))
+                        continue
+
                     for row in snapshot_rows:
                         session.execute(
                             text("""
@@ -319,14 +354,54 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> int:
                             """),
                             row,
                         )
-                    total_inserted += len(snapshot_rows)
 
-        log.info("Inserted %d price snapshot rows", total_inserted)
-        return total_inserted
+                    # Log a DEBUG summary for this card (market price from first NM row).
+                    nm_row = next((r for r in snapshot_rows if r.get("condition") == "NM" and r.get("captured_date") is None), None)
+                    market = nm_row.get("market_price") if nm_row else None
+                    low = nm_row.get("low_price") if nm_row else None
+                    market_str = f"${market:.2f}" if market is not None else "n/a"
+                    low_str = f"${low:.2f}" if low is not None else "n/a"
+                    log.debug(
+                        "[%s] MATCHED: '%s' PPT#%s → %s | market=%s low=%s",
+                        set_id, card_name, raw, card_id, market_str, low_str,
+                    )
+                    stats["matched"] += 1
+
+        return stats
 
     except Exception as e:
         log.exception("Price snapshot insert failed and was rolled back: %s", e)
         raise
+
+
+def _nearby_numbers(
+    target: str,
+    sorted_numbers: list[str],
+    number_to_info: dict[str, tuple[str, str]],
+    n: int = 3,
+) -> list[str]:
+    """
+    Return up to n card numbers from sorted_numbers closest to target.
+
+    Used to provide helpful context in skip warnings when a PPT card number
+    does not match any card in our database.
+
+    Args:
+        target: The card number that was not found (e.g. "58").
+        sorted_numbers: All known card numbers for the set, sorted numerically.
+        number_to_info: Mapping of number -> (card_id, card_name).
+        n: Maximum number of nearby numbers to return.
+
+    Returns:
+        list[str]: Up to n card numbers closest in value to target.
+    """
+    if not target.isdigit() or not sorted_numbers:
+        return []
+    target_int = int(target)
+    # Sort all known numeric numbers by absolute distance from target.
+    by_distance = sorted(sorted_numbers, key=lambda x: abs(int(x) - target_int))
+    # Exclude the target itself (it wasn't found), return the n closest.
+    return [x for x in by_distance if x != target][:n]
 
 
 def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, Any]]:
