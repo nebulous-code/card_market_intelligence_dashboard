@@ -8,8 +8,8 @@ The project is designed to demonstrate competency across the full development st
 
 ### Skills Demonstrated
 
-- Full-stack web development (Vue.js frontend, REST API backend)
-- Third-party API integration (pokemontcg.io, eBay)
+- Full-stack web development (Vue.js frontend, FastAPI backend)
+- Third-party API integration (TCGdex, PokemonPriceTracker)
 - API design and documentation
 - Relational database design and querying
 - Data aggregation and transformation
@@ -22,36 +22,37 @@ The project is designed to demonstrate competency across the full development st
 
 | Source | Purpose |
 | --- | --- |
-| [pokemontcg.io](https://pokemontcg.io) | Card and set metadata, baseline price reference |
-| [eBay Completed Sales API](https://developer.ebay.com) | Real transaction prices for market validation |
+| [TCGdex](https://tcgdex.dev) | Card and set metadata — free, open source REST API |
+| [PokemonPriceTracker](https://pokemonpricetracker.com) | TCGPlayer market prices and eBay graded sale data |
 
 ---
 
 ## Architecture Overview
 
-``` markdown
+```
 [ External APIs ]
-  pokemontcg.io
-  eBay API
+  TCGdex
+  PokemonPriceTracker
        │
        ▼
 [ Ingestion Service ]
-  Scheduled or manually triggered data pull
+  Scheduled via GitHub Actions (nightly)
   Cleans, normalizes, and stores snapshots
        │
        ▼
 [ Database ]
-  PostgreSQL
-  Cards, sets, price history
+  PostgreSQL via Neon (serverless, cloud-hosted)
+  Cards, sets, price snapshots, set identifier mappings
        │
        ▼
 [ Custom REST API ]
-  Node.js / Express (or equivalent)
+  Python / FastAPI
   Serves aggregated data to the frontend
        │
        ▼
 [ Vue.js Dashboard ]
-  Summary views, trend charts, drill-down tables
+  Set list, set detail, card detail views
+  Price distribution charts, drill-down tables, filters
   Export to Excel
        │
        ▼
@@ -72,50 +73,52 @@ Milestones are ordered so that the most foundational skills are demonstrated fir
 
 ## Milestones
 
-### Milestone 1 — Minimum Viable Demo
+### Milestone 1 — Minimum Viable Demo ✅
 
 **Goal:** A single thin slice of the full system, end to end. Every layer of the stack is represented in its simplest working form.
 
 **Scope:**
 
-- Integrate pokemontcg.io — pull one set's card data and an initial price snapshot, store in the database
-- Build a REST API with a small set of core endpoints: `/sets`, `/sets/:id/cards`, `/cards/:id`
-- Build the Vue.js application shell — navigation, one dashboard page with a summary chart and a drill-down table
-- Deploy to a public URL (Railway, Render, or equivalent)
-- Write a README covering the architecture and how to run the project locally
+- Integrate TCGdex — pull Base Set card data and store in the database
+- Build a REST API with core endpoints: `/sets`, `/sets/:id/cards`, `/cards/:id`
+- Build the Vue.js application shell — one dashboard page with a summary chart and a drill-down table
+- Deploy to Render (prod and dev environments)
+- Write a README and planning documentation
 
 **Outcome:** A live, publicly accessible application with a GitHub repository. All layers of the stack are functional and connected.
 
 ---
 
-### Milestone 2 — Real Market Pricing
+### Milestone 2 — Real Market Pricing ✅
 
-**Goal:** Introduce actual transaction data alongside the reference pricing from Milestone 1, and add a time dimension to the dataset.
+**Goal:** Introduce real market pricing data and add a time dimension to the dataset.
 
 **Scope:**
 
-- Integrate the eBay completed sales API for the same card set
-- Add a `price_history` table; begin collecting periodic price snapshots
-- Expose a `/cards/:id/price-history` endpoint from the API
-- Add a price history chart to the card detail view in Vue
-- Display a comparison between pokemontcg.io reference prices and eBay market prices
+- Integrate PokemonPriceTracker API for TCGPlayer market prices
+- Implement watermark-based daily price snapshot ingestion via GitHub Actions
+- Add a card detail page with price history chart
+- Expose a `/cards/:id/price-history` endpoint
 
-**Outcome:** The application now reflects real market behavior and has historical depth that grows over time.
+**Outcome:** The application reflects real market pricing with historical depth that grows over time.
 
 ---
 
-### Milestone 3 — Expanded Data and Analytical Reporting
+### Milestone 3 — Expanded Data and Reporting
 
-**Goal:** Broaden the dataset and elevate the application from a data viewer to an analytical product.
+**Goal:** Stabilize the data pipeline, broaden the dataset to multiple sets, and build out the full frontend navigation structure.
 
 **Scope:**
 
-- Pull in data across multiple card sets
-- Add a set overview page with drill-down navigation into individual cards
-- Add a Market Trends section with written analytical conclusions alongside the visualizations — not just charts, but interpretation
-- Add filtering, sorting, and column controls to the data tables
+- Implement a `set_identifiers` mapping table linking canonical set IDs to TCGdex and PPT names
+- Improve ingestion logging, email summaries, and GitHub Actions artifact uploads
+- Build the frontend shell — persistent sidebar, breadcrumb navigation, Magikarp dark theme, global formatters
+- Add set list page, set detail page (box and whiskers price chart by rarity), and card detail breadcrumbs
+- Add column filters and sorting to the card table with URL-persisted filter state
+- Add a cold start loading experience with health check polling and Lottie animation
+- Ingest Jungle, Fossil, and Pokémon 151
 
-**Outcome:** The application demonstrates both technical breadth and the ability to communicate findings from data, not just display them.
+**Outcome:** A navigable multi-set application with a polished frontend structure and reliable data pipeline.
 
 ---
 
@@ -125,11 +128,11 @@ Milestones are ordered so that the most foundational skills are demonstrated fir
 
 **Scope:**
 
-- Add export-to-Excel functionality from the Vue frontend, with formatted output (headers, column widths, basic chart)
-- Build a Power BI report connected to the PostgreSQL database, covering key metrics and trends
-- Link or embed the Power BI report as a companion artifact within the application
+- Add export-to-Excel from the Vue frontend with formatted output
+- Build a Power BI report connected to the PostgreSQL database
+- Collection CSV feature — users upload a CSV of their cards and receive an Excel report of collection value and performance
 
-**Outcome:** The project now spans the full range of reporting environments — web dashboard, spreadsheet export, and BI tooling.
+**Outcome:** The project spans the full range of reporting environments — web dashboard, spreadsheet export, and BI tooling.
 
 ---
 
@@ -139,26 +142,52 @@ Milestones are ordered so that the most foundational skills are demonstrated fir
 
 **Scope:**
 
-- Add basic API authentication (read-only API key at minimum)
+- Add API key authentication
 - Improve error handling, loading states, and empty states throughout the frontend
-- Automate data refresh on a schedule rather than requiring manual triggers
-- Expand documentation — API reference, architecture notes, and setup guide beyond the README
+- Expand documentation — API reference, architecture notes
+- Production hardening and monitoring improvements
 
-**Outcome:** The application reflects the kind of care and completeness expected in a production environment, not just a demo.
+**Outcome:** The application reflects the care and completeness expected in a production environment.
 
 ---
 
-## Repository Structure (Planned)
+### Milestone 6+ — Future Roadmap
 
-``` markdown
+Ideas and enhancements staged for after Milestone 5 is complete. See [`docs/MILESTONE_6_PLUS_ROADMAP.md`](./MILESTONE_6_PLUS_ROADMAP.md) for the full list.
+
+Highlights include custom domain setup, UI/UX design overhaul, saved and comparable filter presets, variant pricing analysis (1st Edition, Shadowless, etc.), an admin panel for ingestion management, expanded set coverage, price alerts, and a potential public API.
+
+---
+
+## Stack
+
+| Layer | Technology |
+| --- | --- |
+| API | Python, FastAPI, Uvicorn |
+| ORM / Migrations | SQLAlchemy, Alembic |
+| Database | PostgreSQL via Neon |
+| Frontend | Vue.js, Vite, Vuetify |
+| Charts | Chart.js via vue-chartjs |
+| Ingestion Scheduling | GitHub Actions |
+| Deployment | Render (prod + dev) |
+
+---
+
+## Repository Structure
+
+```
 /
-├── api/              # REST API (Node.js / Express or equivalent)
-├── ingestion/        # Data ingestion scripts and scheduler
-├── frontend/         # Vue.js application
-├── db/               # Schema definitions and migrations
-├── docs/             # Planning documentation and API reference
-│   └── PROJECT_OVERVIEW.md
+├── api/                  # FastAPI application
+├── ingestion/            # Data ingestion scripts
+├── frontend/             # Vue.js application
+├── .github/
+│   └── workflows/        # GitHub Actions (nightly ingestion)
+├── docs/                 # Planning and architecture documentation
+│   ├── PROJECT_OVERVIEW.md
+│   ├── DEVELOPMENT_SETUP.md
+│   ├── MILESTONE_1.md
+│   ├── MILESTONE_2.md
+│   ├── MILESTONE_6_PLUS_ROADMAP.md
+│   └── stories/          # Per-story design docs (M03_S01, M03_S02, etc.)
 └── README.md
 ```
-
----
