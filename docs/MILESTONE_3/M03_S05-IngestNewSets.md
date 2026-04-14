@@ -22,7 +22,7 @@ Confirm these are the correct TCGdex IDs by hitting the API directly before runn
 
 - [ ] Jungle — expected ID: `jungle`
 - [ ] Fossil — expected ID: `fossil`
-- [ ] Pokémon 151 — expected ID: `sv3pt5` (verify this — 151 is a modern set and the ID may differ)
+- [ ] Pokémon 150 — expected ID: `sv03.5` (verified)
 
 ```
 https://api.tcgdex.net/v2/en/sets/{set_id}
