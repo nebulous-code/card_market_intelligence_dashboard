@@ -33,54 +33,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 
-# ---- Logging setup -------------------------------------------------------
-# Log messages go to both the terminal and a file called ingestion.log in
-# the ingestion/ directory. The file is useful for reviewing what happened
-# after the fact, especially if the script was run unattended.
-
-# ANSI color codes used to make log levels visually distinct in the terminal.
-_COLORS = {
-    "DEBUG": "\033[36m",     # cyan
-    "INFO": "\033[32m",      # green
-    "WARNING": "\033[33m",   # yellow
-    "ERROR": "\033[31m",     # red
-    "CRITICAL": "\033[35m",  # magenta
-    "RESET": "\033[0m",
-}
-
-
-class _ColorFormatter(logging.Formatter):
-    """Custom log formatter that adds color codes to the level name in console output."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        """
-        Format a log record with color applied to the level name.
-
-        Args:
-            record: The log record to format.
-
-        Returns:
-            str: The formatted log message with ANSI color codes applied.
-        """
-        color = _COLORS.get(record.levelname, _COLORS["RESET"])
-        reset = _COLORS["RESET"]
-        record.levelname = f"{color}{record.levelname}{reset}"
-        return super().format(record)
-
-
-# File handler writes plain text without color codes (color codes in a file
-# would appear as garbage characters when reading the file).
-_file_handler = logging.FileHandler("ingestion.log", encoding="utf-8")
-_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-
-# Console handler uses the color formatter for readability in the terminal.
-_console_handler = logging.StreamHandler()
-_console_handler.setFormatter(_ColorFormatter("%(asctime)s [%(levelname)s] %(message)s"))
-
-logging.basicConfig(level=logging.DEBUG, handlers=[_file_handler, _console_handler])
 log = logging.getLogger(__name__)
-
-# ---- End logging setup ---------------------------------------------------
 
 
 def _parse_date(value: str | None):
@@ -357,7 +310,7 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> int:
                                      captured_at, captured_date)
                                 VALUES
                                     (:card_id, :source, :condition, :market_price, :low_price, :high_price,
-                                     NOW(), CURRENT_DATE)
+                                     NOW(), COALESCE(CAST(:captured_date AS date), CURRENT_DATE))
                                 ON CONFLICT (card_id, source, condition, captured_date) DO UPDATE SET
                                     market_price = EXCLUDED.market_price,
                                     low_price    = EXCLUDED.low_price,
@@ -394,37 +347,82 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
     """
     rows: list[dict[str, Any]] = []
 
-    # --- Current TCGPlayer prices ---
-    # The API returns a flat prices dict with keys like "market", "low", "mid",
-    # "high". We store the current snapshot as condition="NM" (the standard
-    # ungraded near-mint condition) using source="tcgplayer".
-    prices = card.get("prices")
-    if prices:
+    # --- TCGPlayer prices (current + history) ---
+    #
+    # The API response shape differs between free and paid tiers:
+    #
+    # Free tier — prices is a flat dict of scalars, no per-condition breakdown:
+    #   {"market": 62.32, "low": 14.66, "high": 99.99}
+    #
+    # Paid tier — prices.market is a dict keyed by condition name, each
+    # containing latestPrice and an embedded history list:
+    #   {"market": {"Near Mint": {"latestPrice": 62.32, "history": [...]}, ...}}
+    #
+    # Both formats are normalised into snapshot rows below.
+
+    # Condition name mapping from PPT display names to our short labels.
+    _CONDITION_MAP = {
+        "Near Mint": "NM",
+        "Lightly Played": "LP",
+        "Moderately Played": "MP",
+        "Heavily Played": "HP",
+        "Damaged": "DMG",
+    }
+
+    prices = card.get("prices") or {}
+    market_field = prices.get("market")
+
+    if isinstance(market_field, dict):
+        # Paid-tier format: iterate each condition bucket.
+        for condition_name, condition_data in market_field.items():
+            if not isinstance(condition_data, dict):
+                continue
+            condition_label = _CONDITION_MAP.get(condition_name, condition_name)
+
+            # Current price snapshot (today's date).
+            latest = condition_data.get("latestPrice")
+            if latest is not None:
+                rows.append({
+                    "card_id": card_id,
+                    "source": "tcgplayer",
+                    "condition": condition_label,
+                    "market_price": latest,
+                    "low_price": condition_data.get("priceRange", {}).get("min"),
+                    "high_price": condition_data.get("priceRange", {}).get("max"),
+                    "captured_date": None,  # None → CURRENT_DATE in INSERT
+                })
+
+            # Historical snapshots — one row per date point.
+            for point in condition_data.get("history", []):
+                if not isinstance(point, dict):
+                    continue
+                market = point.get("market")
+                date_str = point.get("date", "")
+                # Dates arrive as ISO timestamps ("2025-10-20T00:00:00.000Z").
+                # Truncate to YYYY-MM-DD so PostgreSQL can cast them to DATE.
+                date_str = date_str[:10] if date_str else None
+                if market is None or not date_str:
+                    continue
+                rows.append({
+                    "card_id": card_id,
+                    "source": "tcgplayer",
+                    "condition": condition_label,
+                    "market_price": market,
+                    "low_price": None,
+                    "high_price": None,
+                    "captured_date": date_str,
+                })
+
+    elif market_field is not None:
+        # Free-tier format: flat scalar prices, single NM row.
         rows.append({
             "card_id": card_id,
             "source": "tcgplayer",
             "condition": "NM",
-            "market_price": prices.get("market"),
+            "market_price": market_field,
             "low_price": prices.get("low"),
             "high_price": prices.get("high"),
-        })
-
-    # --- Historical TCGPlayer prices ---
-    # priceHistory is a list of {"date": "YYYY-MM-DD", "market": float} objects.
-    # Each historical point is stored as a separate row with market_price only
-    # (low/high are not available in history). We keep them under source="tcgplayer"
-    # so they appear in the same chart series as current prices.
-    for point in card.get("priceHistory", []):
-        market = point.get("market")
-        if market is None:
-            continue
-        rows.append({
-            "card_id": card_id,
-            "source": "tcgplayer",
-            "condition": "NM",
-            "market_price": market,
-            "low_price": None,
-            "high_price": None,
+            "captured_date": None,
         })
 
     # --- eBay / graded prices (API tier only) ---
@@ -458,6 +456,7 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
             "market_price": avg,
             "low_price": None,
             "high_price": None,
+            "captured_date": None,  # None → use CURRENT_DATE in the INSERT
         })
 
     return rows

@@ -22,7 +22,9 @@ import logging
 import sys
 
 from dotenv import find_dotenv, load_dotenv
+from logging_setup import configure_logging
 
+configure_logging()
 load_dotenv(find_dotenv())
 
 from loader import load_set    # noqa: E402

@@ -30,6 +30,12 @@ import os
 import sys
 
 from dotenv import find_dotenv, load_dotenv
+from logging_setup import configure_logging
+
+# Configure logging before loading any local modules so that log lines
+# from pokemonpricetracker.py, watermark.py, and loader.py all go to
+# both the console and ingestion.log.
+configure_logging()
 
 # Load .env before importing any local modules that read env vars at import time.
 load_dotenv(find_dotenv())
