@@ -59,3 +59,32 @@ export function formatPercent(value) {
     maximumFractionDigits: 2,
   }).format(value)
 }
+
+/**
+ * Format a number as compact USD currency.
+ * Examples: 399.99 → '$400' | 1234.56 → '$1.2K' | 15000 → '$15K' | null → '—'
+ * @param {number|null|undefined} value
+ * @returns {string}
+ */
+export function formatCompactCurrency(value) {
+  if (value === null || value === undefined || isNaN(Number(value))) return '—'
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  }).format(value)
+}
+
+/**
+ * Format an ISO date string to month + year only.
+ * @param {string|null|undefined} value
+ * @returns {string} e.g. 'Jan 1999' or '—'
+ */
+export function formatMonthYear(value) {
+  if (!value) return '—'
+  return new Date(value).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+  })
+}

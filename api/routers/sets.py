@@ -7,7 +7,10 @@ type annotations to automatically validate inputs, serialize outputs, and
 generate the interactive documentation at /docs.
 """
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -39,10 +42,42 @@ def list_sets(db: Session = Depends(get_db)):
         list[SetResponse]: A list of all sets. Returns an empty list if no
             sets have been ingested yet.
     """
-    # Query all sets and sort them newest first.
-    # nulls_last() ensures sets without a release date sort to the bottom
-    # rather than the top, which is PostgreSQL's default for DESC ordering.
-    return db.query(Set).order_by(Set.release_date.desc().nulls_last()).all()
+    # Compute min/avg/max market price per set from latest snapshots.
+    # We join price_snapshots through cards and aggregate per set_id.
+    price_stats = (
+        db.query(
+            Card.set_id,
+            func.min(PriceSnapshot.market_price).label("min_price"),
+            func.avg(PriceSnapshot.market_price).label("avg_price"),
+            func.max(PriceSnapshot.market_price).label("max_price"),
+        )
+        .join(PriceSnapshot, PriceSnapshot.card_id == Card.id)
+        .filter(PriceSnapshot.market_price.isnot(None))
+        .group_by(Card.set_id)
+        .all()
+    )
+    stats_by_set = {row.set_id: row for row in price_stats}
+
+    sets = db.query(Set).order_by(Set.release_date.desc().nulls_last()).all()
+    result = []
+    for s in sets:
+        stats = stats_by_set.get(s.id)
+        result.append(
+            SetResponse(
+                id=s.id,
+                name=s.name,
+                series=s.series,
+                printed_total=s.printed_total,
+                release_date=s.release_date,
+                symbol_url=s.symbol_url,
+                logo_url=s.logo_url,
+                created_at=s.created_at,
+                min_price=Decimal(str(stats.min_price)) if stats and stats.min_price is not None else None,
+                avg_price=Decimal(str(stats.avg_price)) if stats and stats.avg_price is not None else None,
+                max_price=Decimal(str(stats.max_price)) if stats and stats.max_price is not None else None,
+            )
+        )
+    return result
 
 
 @router.get("/{set_id}", response_model=SetResponse)

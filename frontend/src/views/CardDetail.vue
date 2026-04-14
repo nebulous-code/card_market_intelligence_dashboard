@@ -38,7 +38,7 @@
         <v-col>
           <div class="text-h4 font-weight-bold mb-1">{{ card.name }}</div>
           <div class="text-subtitle-1 text-medium-emphasis mb-4">
-            {{ card.set_id }} &bull; #{{ card.number }}
+            {{ card.set_display_name ?? card.set_id }} &bull; #{{ card.number }}/{{ card.set_printed_total ?? '?' }}
           </div>
           <v-chip v-if="card.supertype" class="mr-2" color="primary" variant="tonal">
             {{ card.supertype }}
@@ -145,7 +145,7 @@ import {
   Title,
   Tooltip,
 } from "chart.js";
-import { computed, onMounted, ref } from "vue";
+import { computed, inject, onMounted, onUnmounted, ref } from "vue";
 import { Line } from "vue-chartjs";
 import { useRoute } from "vue-router";
 import { getCard, getPriceHistory } from "../api/index.js";
@@ -156,6 +156,9 @@ ChartJS.register(Title, Tooltip, Legend, LineElement, PointElement, CategoryScal
 
 const route = useRoute();
 const cardId = route.params.cardId;
+
+const setCrumb = inject('setCrumb', () => {})
+const clearCrumbs = inject('clearCrumbs', () => {})
 
 // --- State ---
 const card = ref(null);
@@ -204,17 +207,26 @@ async function fetchHistory() {
 
 onMounted(async () => {
   try {
-    // Fetch card metadata and initial price history in parallel.
     const [cardData] = await Promise.all([
       getCard(cardId),
       fetchHistory(),
     ]);
     card.value = cardData;
+    // Set breadcrumbs: Sets > {Set Name} (linked) > {Card Name} {num}/{total} (plain)
+    const setId = cardData.set_id;
+    const setName = cardData.set_display_name ?? setId;
+    const cardLabel = `${cardData.name} ${cardData.number}/${cardData.set_printed_total ?? '?'}`;
+    setCrumb(1, setName, `/sets/${setId}`);
+    setCrumb(2, cardLabel, null);
   } catch (e) {
     error.value = `Failed to load card: ${e.message}`;
   } finally {
     loading.value = false;
   }
+});
+
+onUnmounted(() => {
+  clearCrumbs();
 });
 
 // --- Chart ---

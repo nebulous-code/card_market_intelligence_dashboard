@@ -49,21 +49,16 @@
  *   - A top bar with breadcrumb navigation
  *   - A scrollable main content area
  *
- * Props:
- *   dynamicCrumbs - Passed through to AppBreadcrumbs so individual views can
- *                   override breadcrumb titles with runtime-loaded names.
+ * dynamicCrumbs is injected from App.vue rather than passed as a prop,
+ * so any descendant view can override breadcrumb titles without prop drilling.
  */
+import { inject } from 'vue'
 import AppBreadcrumbs from '../components/AppBreadcrumbs.vue'
 
-defineProps({
-  dynamicCrumbs: {
-    type: Object,
-    default: () => ({}),
-  },
-})
+const dynamicCrumbs = inject('dynamicCrumbs', { value: {} })
 
 const navItems = [
   { label: 'Sets', icon: 'mdi-cards', route: '/sets', disabled: false },
-  { label: 'Market Trends', icon: 'mdi-chart-line', route: '/trends', disabled: true },
+  { label: 'Market Trends', icon: 'mdi-chart-line', route: '/trends', disabled: false },
 ]
 </script>

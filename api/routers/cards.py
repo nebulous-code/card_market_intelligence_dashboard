@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
 from models.card import Card, PriceSnapshot
+from models.set import Set
 from schemas.card import CardDetailResponse, PriceHistoryResponse, PriceSnapshotResponse
 
 # Create a router for the /cards URL prefix.
@@ -44,13 +45,10 @@ def get_card(card_id: str, db: Session = Depends(get_db)):
     Raises:
         HTTPException: 404 if no card with the given ID exists in the database.
     """
-    # Load the card and eagerly load its price snapshots in the same query.
-    # joinedload avoids a second round-trip to the database for the snapshots.
-    # Without it, accessing card.price_snapshots would trigger an extra query
-    # for every card requested (known as the N+1 query problem).
+    # Load the card with its price snapshots and its parent set in one query.
     card = (
         db.query(Card)
-        .options(joinedload(Card.price_snapshots))
+        .options(joinedload(Card.price_snapshots), joinedload(Card.set))
         .filter(Card.id == card_id)
         .first()
     )
@@ -77,7 +75,12 @@ def get_card(card_id: str, db: Session = Depends(get_db)):
     # a new column to the model and schema is sufficient -- this line never
     # needs to change.
     return CardDetailResponse.model_validate(
-        {**card.__dict__, "latest_prices": [PriceSnapshotResponse.model_validate(s) for s in latest_prices]}
+        {
+            **card.__dict__,
+            "latest_prices": [PriceSnapshotResponse.model_validate(s) for s in latest_prices],
+            "set_display_name": card.set.name if card.set else card.set_id,
+            "set_printed_total": card.set.printed_total if card.set else 0,
+        }
     )
 
 

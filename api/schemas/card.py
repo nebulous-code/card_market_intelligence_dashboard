@@ -96,9 +96,15 @@ class CardDetailResponse(CardResponse):
         latest_prices: List of the most recent price snapshots for this
             card, one per available condition. Empty if no price data
             has been ingested for this card yet.
+        set_display_name: The human-readable name of the card's set
+            (e.g. "Base Set"), joined from the sets table.
+        set_printed_total: Total cards printed in the set (e.g. 102),
+            used to format card number as "4/102".
     """
 
     latest_prices: list[PriceSnapshotResponse]
+    set_display_name: str
+    set_printed_total: int
 
 
 class PriceHistoryResponse(BaseModel):

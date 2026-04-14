@@ -12,6 +12,7 @@ will raise a clear error if any field is missing or has the wrong type.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel
 
@@ -43,6 +44,9 @@ class SetResponse(BaseModel):
     symbol_url: str | None
     logo_url: str | None
     created_at: datetime
+    min_price: Decimal | None = None
+    avg_price: Decimal | None = None
+    max_price: Decimal | None = None
 
     # from_attributes=True allows Pydantic to read values from a SQLAlchemy
     # model object directly, rather than requiring a plain dictionary.
