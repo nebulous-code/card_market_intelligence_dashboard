@@ -1,14 +1,14 @@
 <template>
   <v-container class="py-6">
 
-    <!-- Back button -->
+    <!-- Back button — goes to the set this card belongs to once loaded -->
     <v-btn
-      :to="'/sets'"
+      :to="card ? `/sets/${card.set_id}` : '/sets'"
       variant="text"
       prepend-icon="mdi-arrow-left"
       class="mb-4"
     >
-      Back to Sets
+      {{ card ? (card.set_display_name ?? card.set_id) : 'Sets' }}
     </v-btn>
 
     <!-- Loading state -->

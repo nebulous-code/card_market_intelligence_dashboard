@@ -57,41 +57,41 @@
 
           <!-- Set name -->
           <v-card-text class="pa-3 pb-0">
-            <div class="text-subtitle-2 font-weight-bold text-truncate">{{ set.name }}</div>
+            <div class="text-subtitle-1 font-weight-bold text-truncate">{{ set.name }}</div>
 
             <!-- Meta row -->
             <div class="d-flex justify-space-between mt-1">
-              <span class="text-caption text-medium-emphasis">{{ set.printed_total }} cards</span>
-              <span class="text-caption text-medium-emphasis">{{ formatMonthYear(set.release_date) }}</span>
+              <span class="text-body-2 text-medium-emphasis">{{ set.printed_total }} cards</span>
+              <span class="text-body-2 text-medium-emphasis">{{ formatMonthYear(set.release_date) }}</span>
             </div>
           </v-card-text>
 
           <!-- Price mini-table -->
           <v-card-text class="pa-3 pt-2">
             <template v-if="set.min_price != null">
-              <div class="d-flex justify-space-between text-caption text-medium-emphasis mb-1">
+              <div class="d-flex justify-space-between text-body-2 text-medium-emphasis mb-1">
                 <span>Min</span>
                 <span>Avg</span>
                 <span>Max</span>
               </div>
-              <div class="d-flex justify-space-between text-caption font-weight-bold text-primary">
-                <span>{{ formatCompactCurrency(set.min_price) }}</span>
-                <span>{{ formatCompactCurrency(set.avg_price) }}</span>
-                <span>{{ formatCompactCurrency(set.max_price) }}</span>
+              <div class="d-flex justify-space-between text-body-2 font-weight-bold text-primary">
+                <span>{{ formatCurrency(set.min_price) }}</span>
+                <span>{{ formatCurrency(set.avg_price) }}</span>
+                <span>{{ formatCurrency(set.max_price) }}</span>
               </div>
             </template>
             <template v-else>
-              <div class="d-flex justify-space-between text-caption text-medium-emphasis mb-1">
+              <div class="d-flex justify-space-between text-body-2 text-medium-emphasis mb-1">
                 <span>Min</span>
                 <span>Avg</span>
                 <span>Max</span>
               </div>
-              <div class="d-flex justify-space-between text-caption text-medium-emphasis">
+              <div class="d-flex justify-space-between text-body-2 text-medium-emphasis">
                 <span>—</span>
                 <span>—</span>
                 <span>—</span>
               </div>
-              <div class="text-caption text-medium-emphasis mt-1 text-center">No pricing data yet</div>
+              <div class="text-body-2 text-medium-emphasis mt-1 text-center">No pricing data yet</div>
             </template>
           </v-card-text>
         </v-card>
@@ -104,7 +104,7 @@
 import { onMounted, ref } from "vue";
 import { getSets } from "../api/index.js";
 import EmptyState from "../components/EmptyState.vue";
-import { formatCompactCurrency, formatMonthYear } from "../utils/formatters.js";
+import { formatCurrency, formatMonthYear } from "../utils/formatters.js";
 
 const sets = ref([]);
 const loadingSets = ref(true);

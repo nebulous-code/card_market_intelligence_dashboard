@@ -190,8 +190,9 @@ const chartOptions = {
     tooltip: {
       callbacks: {
         label(ctx) {
-          const { min, q1, median, q3, max } = ctx.raw ?? {};
-          const count = ctx.raw?.items?.length ?? (Array.isArray(ctx.raw) ? ctx.raw.length : "?");
+          // chartjs-chart-boxplot puts computed stats on ctx.parsed; ctx.raw is the input array
+          const { min, q1, median, q3, max } = ctx.parsed ?? {};
+          const count = Array.isArray(ctx.raw) ? ctx.raw.length : "?";
           return [
             `Cards: ${count}`,
             `Min: ${formatCurrency(min)}`,
@@ -207,9 +208,25 @@ const chartOptions = {
   scales: {
     y: {
       type: "logarithmic",
+      min: 0.1,
       title: { display: true, text: "Market Price (USD)" },
       ticks: {
         callback: (val) => formatCompactCurrency(val),
+        padding: 10,
+      },
+      grid: {
+        drawTicks: true,
+        tickLength: 8,
+      },
+      // Force ticks at every power-of-10 and the midpoint (5×) between each decade.
+      // Chart.js log scale auto-ticks are unpredictable, so we replace them entirely.
+      afterBuildTicks(scale) {
+        const TICK_SEQUENCE = [
+          0.1, 0.5, 1, 5, 10, 50, 100, 500, 1_000, 5_000, 10_000, 50_000, 100_000,
+        ];
+        scale.ticks = TICK_SEQUENCE
+          .filter((v) => v <= (scale.max ?? Infinity) * 1.5)
+          .map((v) => ({ value: v }));
       },
     },
   },
