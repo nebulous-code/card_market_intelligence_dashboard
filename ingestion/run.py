@@ -84,6 +84,12 @@ def main() -> None:
         "Starting price ingestion run. include_history=%s history_days=%s include_ebay=%s",
         include_history, history_days, include_ebay,
     )
+    log.debug(
+        "Raw env values: PPT_INCLUDE_HISTORY=%r PPT_HISTORY_DAYS=%r PPT_INCLUDE_EBAY=%r",
+        os.environ.get("PPT_INCLUDE_HISTORY"),
+        os.environ.get("PPT_HISTORY_DAYS"),
+        os.environ.get("PPT_INCLUDE_EBAY"),
+    )
 
     # Open a single session for watermark reads/writes throughout the run.
     engine = create_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
@@ -198,12 +204,17 @@ def main() -> None:
         # Update the watermark with the next offset.
         # next_offset=0 means the full set completed; any other value means
         # the run was interrupted and the next run should resume from there.
+        # Only mark backfilled=True when the set fully completed this run
+        # (next_offset=0 means no more pages). If the run was interrupted
+        # mid-set, keep backfilled=False so the next resume still requests
+        # history for the remaining cards.
+        set_completed = next_offset == 0
         with Session(engine) as session:
             with session.begin():
                 set_watermark(
                     session,
                     set_id,
-                    backfilled=run_with_history,
+                    backfilled=run_with_history and set_completed,
                     last_offset=next_offset,
                 )
         if next_offset == 0:

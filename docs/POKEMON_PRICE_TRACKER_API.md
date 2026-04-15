@@ -101,6 +101,8 @@ Cost: 1 credit per card returned.
 
 ### Response Shape
 
+> **Note (verified April 2026):** The actual API response format differs from older documentation. `prices.market` is a flat scalar, `prices.variants` contains per-printing/condition breakdowns, and `priceHistory` is **not returned** even when `includeHistory=true` is sent. History accumulates from daily snapshot runs rather than a bulk backfill.
+
 ```json
 {
   "data": [
@@ -114,21 +116,33 @@ Cost: 1 credit per card returned.
       "prices": {
         "market": 399.99,
         "low": 275.00,
-        "mid": 375.00,
-        "high": 575.00
+        "sellers": 382,
+        "listings": 0,
+        "primaryPrinting": "Unlimited",
+        "lastUpdated": "2026-04-15T00:00:00.000Z",
+        "variants": {
+          "1st Edition": {
+            "Near Mint 1st Edition": {
+              "price": 17.11,
+              "listings": null,
+              "priceString": "$17.11",
+              "lastUpdated": "2026-04-15T00:00:00.000Z"
+            }
+          },
+          "Unlimited": {
+            "Near Mint Unlimited": {
+              "price": 1.20,
+              "listings": null,
+              "priceString": "$1.20",
+              "lastUpdated": "2026-04-15T00:00:00.000Z"
+            }
+          }
+        }
       },
-      "priceHistory": [
-        { "date": "2025-04-10", "market": 395.00 },
-        { "date": "2025-04-09", "market": 401.00 }
-      ],
       "ebay": {
         "psa10": { "avg": 15750.00 },
         "psa9": { "avg": 1850.00 },
         "bgs95": { "avg": 12000.00 }
-      },
-      "image": {
-        "small": "https://tcgplayer-cdn.tcgplayer.com/..._200x200.jpg",
-        "large": "https://tcgplayer-cdn.tcgplayer.com/..._400x400.jpg"
       }
     }
   ],
@@ -142,7 +156,7 @@ Cost: 1 credit per card returned.
 }
 ```
 
-Fields present in the response depend on the parameters sent. `priceHistory` is only present when `includeHistory=true`. `ebay` is only present when `includeEbay=true` and the account is on the API tier or above.
+Fields present in the response depend on the parameters sent. `ebay` is only present when `includeEbay=true` and the account is on the API tier or above. `priceHistory` is not returned by the current API — historical data builds up from daily snapshot runs.
 
 ---
 

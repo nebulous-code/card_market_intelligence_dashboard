@@ -12,4 +12,5 @@
 #
 # Usage: .\run_prices.ps1
 
+$env:LOG_LEVEL = "DEBUG"
 uv run python run.py

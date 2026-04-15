@@ -409,9 +409,14 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
     Convert a single PokemonPriceTracker card object into snapshot row dicts.
 
     Produces one row for each available price data point:
-      - Current TCGPlayer prices (prices.market / low / high) keyed by condition
-      - Historical TCGPlayer prices from priceHistory (market only, no low/high)
+      - Current prices from prices.variants (per-printing/condition breakdown)
+      - Falls back to prices.market scalar if variants is absent
       - eBay/graded prices from ebay.* when present (API tier)
+
+    Note: The PPT API does not currently return historical price data in its
+    response even when includeHistory=true is sent. History accumulates over
+    time from daily snapshots. The priceHistory field documented in older API
+    references is not present in actual responses as of April 2026.
 
     Args:
         card_id: The tcgPlayerId value for this card.
@@ -422,79 +427,89 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
     """
     rows: list[dict[str, Any]] = []
 
-    # --- TCGPlayer prices (current + history) ---
+    # --- TCGPlayer prices (current) ---
     #
-    # The API response shape differs between free and paid tiers:
+    # The actual PPT API response shape (as of April 2026):
     #
-    # Free tier — prices is a flat dict of scalars, no per-condition breakdown:
-    #   {"market": 62.32, "low": 14.66, "high": 99.99}
+    #   prices = {
+    #     "market": 1.2,            # scalar: overall market price
+    #     "low": 0.16,              # scalar: lowest listing
+    #     "variants": {             # per-printing, per-condition breakdown
+    #       "1st Edition": {
+    #         "Near Mint 1st Edition": {
+    #           "price": 17.11, "listings": None, "priceString": "$17.11",
+    #           "lastUpdated": "..."
+    #         }
+    #       },
+    #       "Unlimited": {
+    #         "Near Mint Unlimited": {
+    #           "price": 1.2, "listings": None, "priceString": "$1.20",
+    #           "lastUpdated": "..."
+    #         }
+    #       }
+    #     }
+    #   }
     #
-    # Paid tier — prices.market is a dict keyed by condition name, each
-    # containing latestPrice and an embedded history list:
-    #   {"market": {"Near Mint": {"latestPrice": 62.32, "history": [...]}, ...}}
-    #
-    # Both formats are normalised into snapshot rows below.
+    # Condition labels are built as "<SHORT_COND> (<Printing>)" when multiple
+    # printings exist (e.g. "NM (1st Edition)"), or just "<SHORT_COND>" when
+    # there is only one printing, to keep the labels readable.
 
-    # Condition name mapping from PPT display names to our short labels.
-    _CONDITION_MAP = {
-        "Near Mint": "NM",
-        "Lightly Played": "LP",
-        "Moderately Played": "MP",
-        "Heavily Played": "HP",
-        "Damaged": "DMG",
-    }
+    # Condition prefix → short label.
+    _CONDITION_PREFIXES = [
+        ("Near Mint", "NM"),
+        ("Lightly Played", "LP"),
+        ("Moderately Played", "MP"),
+        ("Heavily Played", "HP"),
+        ("Damaged", "DMG"),
+    ]
+
+    def _short_condition(full_name: str) -> str:
+        """Map a PPT condition string like 'Near Mint 1st Edition' to 'NM'."""
+        for prefix, short in _CONDITION_PREFIXES:
+            if full_name.startswith(prefix):
+                return short
+        return full_name  # unknown condition — keep as-is
 
     prices = card.get("prices") or {}
-    market_field = prices.get("market")
+    variants = prices.get("variants")
 
-    if isinstance(market_field, dict):
-        # Paid-tier format: iterate each condition bucket.
-        for condition_name, condition_data in market_field.items():
-            if not isinstance(condition_data, dict):
+    if isinstance(variants, dict) and variants:
+        # New format: per-printing / per-condition breakdown.
+        # Determine whether there are multiple distinct printings so we can
+        # decide whether to include the printing suffix in the label.
+        printing_names = list(variants.keys())
+        multi_printing = len(printing_names) > 1
+
+        for printing, conditions in variants.items():
+            if not isinstance(conditions, dict):
                 continue
-            condition_label = _CONDITION_MAP.get(condition_name, condition_name)
+            for condition_full, condition_data in conditions.items():
+                if not isinstance(condition_data, dict):
+                    continue
+                price = condition_data.get("price")
+                if price is None:
+                    continue
 
-            # Current price snapshot (today's date).
-            latest = condition_data.get("latestPrice")
-            if latest is not None:
+                short_cond = _short_condition(condition_full)
+                label = f"{short_cond} ({printing})" if multi_printing else short_cond
+
                 rows.append({
                     "card_id": card_id,
                     "source": "tcgplayer",
-                    "condition": condition_label,
-                    "market_price": latest,
-                    "low_price": condition_data.get("priceRange", {}).get("min"),
-                    "high_price": condition_data.get("priceRange", {}).get("max"),
+                    "condition": label,
+                    "market_price": price,
+                    "low_price": None,
+                    "high_price": None,
                     "captured_date": None,  # None → CURRENT_DATE in INSERT
                 })
 
-            # Historical snapshots — one row per date point.
-            for point in condition_data.get("history", []):
-                if not isinstance(point, dict):
-                    continue
-                market = point.get("market")
-                date_str = point.get("date", "")
-                # Dates arrive as ISO timestamps ("2025-10-20T00:00:00.000Z").
-                # Truncate to YYYY-MM-DD so PostgreSQL can cast them to DATE.
-                date_str = date_str[:10] if date_str else None
-                if market is None or not date_str:
-                    continue
-                rows.append({
-                    "card_id": card_id,
-                    "source": "tcgplayer",
-                    "condition": condition_label,
-                    "market_price": market,
-                    "low_price": None,
-                    "high_price": None,
-                    "captured_date": date_str,
-                })
-
-    elif market_field is not None:
-        # Free-tier format: flat scalar prices, single NM row.
+    elif prices.get("market") is not None:
+        # Fallback: flat scalar market price, no per-condition breakdown.
         rows.append({
             "card_id": card_id,
             "source": "tcgplayer",
             "condition": "NM",
-            "market_price": market_field,
+            "market_price": prices["market"],
             "low_price": prices.get("low"),
             "high_price": prices.get("high"),
             "captured_date": None,
