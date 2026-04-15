@@ -8,13 +8,21 @@ by foreign key.
 
 Usage (manual):
     uv run python run_ingest.py --set-id base1
+    uv run python run_ingest.py --set-id base2 --new-set   # first-time ingest
 
 Usage via shell scripts:
-    ./run_ingest.sh base1      (Linux / macOS / WSL)
-    .\\run_ingest.ps1 base1    (Windows PowerShell)
+    ./run_ingest.sh base1              (Linux / macOS / WSL)
+    .\\run_ingest.ps1 -SetId base1     (Windows PowerShell)
+    .\\run_ingest.ps1 -SetId base2 -NewSet   (first-time ingest)
 
 The script is idempotent: sets and cards are upserted, so re-running it
 for the same set will update any changed fields without creating duplicates.
+
+--new-set flag:
+    Bypasses the set_identifiers resolver and passes the given ID directly
+    to the TCGdex API. Use this only when ingesting a brand-new set that
+    does not yet have a row in set_identifiers. After the ingest completes,
+    insert the set_identifiers mappings and omit the flag on future runs.
 """
 
 import argparse
@@ -41,20 +49,34 @@ def main() -> None:
         required=True,
         help="Any recognizable set identifier (e.g. base1, 'Base Set').",
     )
+    parser.add_argument(
+        "--new-set",
+        action="store_true",
+        help=(
+            "Bypass the set_identifiers resolver and pass the ID directly to TCGdex. "
+            "Use only for first-time ingestion of a set that has no mapping row yet. "
+            "After ingestion, insert the set_identifiers rows and drop this flag."
+        ),
+    )
     args = parser.parse_args()
     search_term: str = args.set_id
 
-    # Resolve the canonical TCGdex ID through the set_identifiers table.
-    # This ensures we always use the exact ID TCGdex expects, and fails loudly
-    # if the mapping is missing rather than silently calling the API with a
-    # wrong identifier.
-    try:
-        tcgdex_id = resolve_identifier(search_term, SOURCE_TCGDEX)
-    except SetIdentifierNotFoundError as e:
-        log.error("%s", e)
-        sys.exit(1)
+    if args.new_set:
+        # Trust the provided ID and pass it straight to TCGdex.
+        tcgdex_id = search_term
+        log.info("--new-set flag set: using '%s' directly as TCGdex ID (resolver bypassed)", tcgdex_id)
+    else:
+        # Resolve the canonical TCGdex ID through the set_identifiers table.
+        # This ensures we always use the exact ID TCGdex expects, and fails loudly
+        # if the mapping is missing rather than silently calling the API with a
+        # wrong identifier.
+        try:
+            tcgdex_id = resolve_identifier(search_term, SOURCE_TCGDEX)
+        except SetIdentifierNotFoundError as e:
+            log.error("%s", e)
+            sys.exit(1)
+        log.info("Resolved '%s' -> TCGdex ID '%s'", search_term, tcgdex_id)
 
-    log.info("Resolved '%s' → TCGdex ID '%s'", search_term, tcgdex_id)
     log.info("Fetching set metadata for: %s", tcgdex_id)
     try:
         set_data = get_set(tcgdex_id)
@@ -69,7 +91,7 @@ def main() -> None:
     log.info("Fetched %d cards successfully.", len(cards))
 
     load_set(set_data, cards)
-    log.info("Ingestion complete for set: %s (%s)", set_id, set_data.get("name"))
+    log.info("Ingestion complete for set: %s (%s)", tcgdex_id, set_data.get("name"))
 
 
 if __name__ == "__main__":

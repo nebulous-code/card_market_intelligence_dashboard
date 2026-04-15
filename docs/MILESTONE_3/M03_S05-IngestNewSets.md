@@ -10,9 +10,9 @@ Complete S01 (Set Mapping Table) before starting this story.
 
 ## Prerequisites
 
-- [ ] M03_S01 is merged and deployed — `set_identifiers` table exists
-- [ ] PPT paid API tier is active — free tier (100 credits/day) is insufficient for multi-set ingestion
-- [ ] `PPT_INCLUDE_HISTORY=true` and `PPT_HISTORY_DAYS=180` are set in `.env` and GitHub Actions variables
+- [x] M03_S01 is merged and deployed — `set_identifiers` table exists
+- [x] PPT paid API tier is active — free tier (100 credits/day) is insufficient for multi-set ingestion
+- [x] `PPT_INCLUDE_HISTORY=true` and `PPT_HISTORY_DAYS=180` are set in `.env` and GitHub Actions variables
 
 ---
 
@@ -20,9 +20,9 @@ Complete S01 (Set Mapping Table) before starting this story.
 
 Confirm these are the correct TCGdex IDs by hitting the API directly before running ingestion:
 
-- [ ] Jungle — expected ID: `jungle`
-- [ ] Fossil — expected ID: `fossil`
-- [ ] Pokémon 150 — expected ID: `sv03.5` (verified)
+- [x] Jungle — expected ID: `base2` (verified)
+- [x] Fossil — expected ID: `base3` (verified)
+- [x] Pokémon 150 — expected ID: `sv03.5` (verified)
 
 ```
 https://api.tcgdex.net/v2/en/sets/{set_id}
@@ -44,10 +44,10 @@ GET /api/v2/sets
 Authorization: Bearer YOUR_API_KEY
 ```
 
-- [ ] Confirm PPT name for Jungle
-- [ ] Confirm PPT name for Fossil
-- [ ] Confirm PPT name for Pokémon 151
-- [ ] Confirm PPT name for Base Set matches what is already in `set_identifiers` (`"Base Set"`)
+- [x] Confirm PPT name for Jungle - `Jungle` (verified)
+- [x] Confirm PPT name for Fossil - `Fossil` (verified)
+- [x] Confirm PPT name for Pokémon 151 - `SV: Scarlet & Violet 151` (verified)
+- [x] Confirm PPT name for Base Set matches what is already in `set_identifiers` (`"Base Set"`) (verified)
 
 ---
 
@@ -58,26 +58,26 @@ Once you have confirmed IDs and names, insert the mappings. Template — fill in
 ```sql
 -- Jungle
 INSERT INTO set_identifiers (set_id, source, identifier, identifier_type) VALUES
-    ('jungle', 'tcgdex', 'jungle',         'id'),
-    ('jungle', 'tcgdex', 'Jungle',         'name'),
-    ('jungle', 'ppt',    '<confirm name>', 'name');
+    ('base2', 'tcgdex', 'base2',         'id'),
+    ('base2', 'tcgdex', 'Jungle',         'name'),
+    ('base2', 'ppt',    'Jungle', 'name');
 
 -- Fossil
 INSERT INTO set_identifiers (set_id, source, identifier, identifier_type) VALUES
-    ('fossil', 'tcgdex', 'fossil',         'id'),
-    ('fossil', 'tcgdex', 'Fossil',         'name'),
-    ('fossil', 'ppt',    '<confirm name>', 'name');
+    ('base3', 'tcgdex', 'base3',         'id'),
+    ('base3', 'tcgdex', 'Fossil',         'name'),
+    ('base3', 'ppt',    'Fossil', 'name');
 
 -- Pokémon 151
 INSERT INTO set_identifiers (set_id, source, identifier, identifier_type) VALUES
-    ('<confirmed_id>', 'tcgdex', '<confirmed_id>', 'id'),
-    ('<confirmed_id>', 'tcgdex', 'Pokémon 151',    'name'),
-    ('<confirmed_id>', 'ppt',    '<confirm name>', 'name');
+    ('sv03.5', 'tcgdex', 'sv03.5', 'id'),
+    ('sv03.5', 'tcgdex', 'Pokemon 151',    'name'),
+    ('sv03.5', 'ppt',    'SV: Scarlet & Violet 151', 'name');
 ```
 
-- [ ] Jungle entries inserted
-- [ ] Fossil entries inserted
-- [ ] Pokémon 151 entries inserted
+- [x] Jungle entries inserted
+- [x] Fossil entries inserted
+- [x] Pokémon 151 entries inserted
 
 ---
 
@@ -86,23 +86,23 @@ INSERT INTO set_identifiers (set_id, source, identifier, identifier_type) VALUES
 Run in this order. Verify each set before moving to the next.
 
 ```bash
-python run.py --set-id jungle
-python run.py --set-id fossil
-python run.py --set-id <151 id>
+python run.py --set-id base2
+python run.py --set-id base3 
+python run.py --set-id sv03.5
 ```
 
 After each run verify the set landed correctly:
 
 ```sql
 SELECT id, name, printed_total FROM sets ORDER BY release_date;
-SELECT COUNT(*) FROM cards WHERE set_id = 'jungle';
-SELECT COUNT(*) FROM cards WHERE set_id = 'fossil';
-SELECT COUNT(*) FROM cards WHERE set_id = '<151 id>';
+SELECT COUNT(*) FROM cards WHERE set_id = 'base2';
+SELECT COUNT(*) FROM cards WHERE set_id = 'base3';
+SELECT COUNT(*) FROM cards WHERE set_id = 'sv03.5';
 ```
 
-- [ ] Jungle — confirm card count matches expected (`64` cards)
-- [ ] Fossil — confirm card count matches expected (`62` cards)
-- [ ] Pokémon 151 — confirm card count matches expected (`165` cards)
+- [x] Jungle — confirm card count matches expected (`64` cards)
+- [x] Fossil — confirm card count matches expected (`62` cards)
+- [x] Pokémon 151 — confirm card count matches expected (`165` cards)
 
 If counts are wrong, check the ingestion logs for errors or skipped cards.
 
@@ -124,10 +124,10 @@ GROUP BY c.set_id
 ORDER BY c.set_id;
 ```
 
-- [ ] Base Set has snapshots
-- [ ] Jungle has snapshots
-- [ ] Fossil has snapshots
-- [ ] Pokémon 151 has snapshots
+- [x] Base Set has snapshots
+- [x] Jungle has snapshots
+- [x] Fossil has snapshots
+- [x] Pokémon 151 has snapshots
 
 ---
 
@@ -135,10 +135,10 @@ ORDER BY c.set_id;
 
 Check the ingestion logs or summary email for each set and note:
 
-- [ ] Base Set match rate is acceptable (document actual number e.g. `97/102`)
-- [ ] Jungle match rate is acceptable
-- [ ] Fossil match rate is acceptable
-- [ ] Pokémon 151 match rate is acceptable
+- [x] Base Set match rate is acceptable (document actual number e.g. `97/102`)
+- [x] Jungle match rate is acceptable
+- [x] Fossil match rate is acceptable
+- [x] Pokémon 151 match rate is acceptable
 
 If a match rate is unexpectedly low (below ~85%) investigate whether it is a card numbering format issue, a PPT coverage gap, or a bug. Document findings here for future reference.
 
@@ -148,10 +148,10 @@ If a match rate is unexpectedly low (below ~85%) investigate whether it is a car
 
 Once data is in the database, open the app and confirm:
 
-- [ ] All four sets appear on the Set List page with logos and pricing data
-- [ ] Each set detail page loads the correct cards and chart
-- [ ] No sets show stale or cross-contaminated data
-- [ ] Box and whiskers chart renders correctly for each set (some sets may have sparser rarity data than Base Set)
+- [x] All four sets appear on the Set List page with logos and pricing data
+- [x] Each set detail page loads the correct cards and chart
+- [x] No sets show stale or cross-contaminated data
+- [x] Box and whiskers chart renders correctly for each set (some sets may have sparser rarity data than Base Set)
 
 ---
 

@@ -11,13 +11,25 @@
 # The API server must have been started at least once before running this
 # script so that Alembic has created the database tables.
 #
-# Usage: .\run_ingest.ps1 -SetId base1
+# Usage:
+#   .\run_ingest.ps1 -SetId base1           # existing set (must be in set_identifiers)
+#   .\run_ingest.ps1 -SetId base2 -NewSet   # first-time ingest, bypasses resolver
 
 param(
     # The TCGdex set ID to ingest. Required.
     # Example values: base1 (Base Set), base2 (Jungle), base3 (Fossil)
     [Parameter(Mandatory=$true)]
-    [string]$SetId
+    [string]$SetId,
+
+    # Pass -NewSet when ingesting a set for the first time.
+    # Bypasses the set_identifiers resolver so the set can be fetched directly
+    # from TCGdex before its mapping row exists. After ingestion completes,
+    # insert the set_identifiers rows and omit this flag on future runs.
+    [switch]$NewSet
 )
 
-uv run python run_ingest.py --set-id $SetId
+if ($NewSet) {
+    uv run python run_ingest.py --set-id $SetId --new-set
+} else {
+    uv run python run_ingest.py --set-id $SetId
+}
