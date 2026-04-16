@@ -341,12 +341,12 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> dict
                         session.execute(
                             text("""
                                 INSERT INTO price_snapshots
-                                    (card_id, source, condition, market_price, low_price, high_price,
+                                    (card_id, source, condition, variant, market_price, low_price, high_price,
                                      captured_at, captured_date)
                                 VALUES
-                                    (:card_id, :source, :condition, :market_price, :low_price, :high_price,
+                                    (:card_id, :source, :condition, :variant, :market_price, :low_price, :high_price,
                                      NOW(), COALESCE(CAST(:captured_date AS date), CURRENT_DATE))
-                                ON CONFLICT (card_id, source, condition, captured_date) DO UPDATE SET
+                                ON CONFLICT (card_id, source, condition, variant, captured_date) DO UPDATE SET
                                     market_price = EXCLUDED.market_price,
                                     low_price    = EXCLUDED.low_price,
                                     high_price   = EXCLUDED.high_price,
@@ -355,15 +355,14 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> dict
                             row,
                         )
 
-                    # Log a DEBUG summary for this card (market price from first NM row).
-                    nm_row = next((r for r in snapshot_rows if r.get("condition") == "NM" and r.get("captured_date") is None), None)
-                    market = nm_row.get("market_price") if nm_row else None
-                    low = nm_row.get("low_price") if nm_row else None
-                    market_str = f"${market:.2f}" if market is not None else "n/a"
-                    low_str = f"${low:.2f}" if low is not None else "n/a"
+                    # Log a DEBUG summary for this card.
+                    variants_in_rows = len({r.get("variant") for r in snapshot_rows})
+                    conds_in_rows = len({r.get("condition") for r in snapshot_rows})
+                    history_rows = sum(1 for r in snapshot_rows if r.get("captured_date") is not None)
                     log.debug(
-                        "[%s] MATCHED: '%s' PPT#%s → %s | market=%s low=%s",
-                        set_id, card_name, raw, card_id, market_str, low_str,
+                        "[%s] MATCHED: '%s' PPT#%s → %s | %d variant(s), %d condition(s), %d history points",
+                        set_id, card_name, raw, card_id,
+                        variants_in_rows, conds_in_rows, history_rows,
                     )
                     stats["matched"] += 1
 
@@ -409,17 +408,29 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
     Convert a single PokemonPriceTracker card object into snapshot row dicts.
 
     Produces one row for each available price data point:
-      - Current prices from prices.variants (per-printing/condition breakdown)
-      - Falls back to prices.market scalar if variants is absent
+      - Historical rows from priceHistory.variants (per-variant, per-condition)
+      - Current-price rows from prices.variants for today's date
+      - Falls back to prices.market scalar when neither structure is present
       - eBay/graded prices from ebay.* when present (API tier)
 
-    Note: The PPT API does not currently return historical price data in its
-    response even when includeHistory=true is sent. History accumulates over
-    time from daily snapshots. The priceHistory field documented in older API
-    references is not present in actual responses as of April 2026.
+    The PPT API returns history under priceHistory.variants when
+    includeHistory=true is sent. Structure (verified April 2026):
+
+        priceHistory.variants = {
+          "Holofoil": {
+            "Near Mint": {
+              "history": [{"date": "2025-10-17T...", "market": 62.32, "volume": 4}, ...],
+              "dataPoints": 26,
+              "latestPrice": 62.32
+            },
+            "Lightly Played": { ... },
+            ...
+          },
+          "1st Edition Holofoil": { ... }
+        }
 
     Args:
-        card_id: The tcgPlayerId value for this card.
+        card_id: The internal card ID in our database (matched by card number).
         card: The card object from the PokemonPriceTracker API response.
 
     Returns:
@@ -427,93 +438,178 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
     """
     rows: list[dict[str, Any]] = []
 
-    # --- TCGPlayer prices (current) ---
-    #
-    # The actual PPT API response shape (as of April 2026):
-    #
-    #   prices = {
-    #     "market": 1.2,            # scalar: overall market price
-    #     "low": 0.16,              # scalar: lowest listing
-    #     "variants": {             # per-printing, per-condition breakdown
-    #       "1st Edition": {
-    #         "Near Mint 1st Edition": {
-    #           "price": 17.11, "listings": None, "priceString": "$17.11",
-    #           "lastUpdated": "..."
-    #         }
-    #       },
-    #       "Unlimited": {
-    #         "Near Mint Unlimited": {
-    #           "price": 1.2, "listings": None, "priceString": "$1.20",
-    #           "lastUpdated": "..."
-    #         }
-    #       }
-    #     }
-    #   }
-    #
-    # Condition labels are built as "<SHORT_COND> (<Printing>)" when multiple
-    # printings exist (e.g. "NM (1st Edition)"), or just "<SHORT_COND>" when
-    # there is only one printing, to keep the labels readable.
+    # --- Condition and variant normalization maps ---
 
-    # Condition prefix → short label.
-    _CONDITION_PREFIXES = [
-        ("Near Mint", "NM"),
-        ("Lightly Played", "LP"),
-        ("Moderately Played", "MP"),
-        ("Heavily Played", "HP"),
-        ("Damaged", "DMG"),
+    CONDITION_MAP = {
+        "Near Mint":         "NM",
+        "Lightly Played":    "LP",
+        "Moderately Played": "MP",
+        "Heavily Played":    "HP",
+        "Damaged":           "DMG",
+    }
+
+    # PPT variant strings → normalized DB values.
+    # None means no variant distinction (standard/unlimited printing) — stored as NULL.
+    VARIANT_MAP = {
+        "Holofoil":             "holofoil",
+        "1st Edition Holofoil": "1st_edition_holofoil",
+        "Reverse Holofoil":     "reverse_holofoil",
+        "Normal":               None,
+        "1st Edition Normal":   "1st_edition_normal",
+        # Older sets (Base Set, Jungle, Fossil, Base Set 2) use bare printing labels.
+        "1st Edition":          "1st_edition",
+        "Unlimited":            "unlimited",
+    }
+
+    # Suffixes PPT sometimes appends to the condition key when variant info
+    # bleeds into the condition string (e.g. "Near Mint 1st Edition").
+    # Listed longest-first so more-specific matches are tried before shorter ones.
+    _CONDITION_SUFFIXES = [
+        " 1st Edition Holofoil",
+        " Reverse Holofoil",
+        " 1st Edition Normal",
+        " 1st Edition",
+        " Holofoil",
+        " Unlimited",
+        " Normal",
     ]
 
-    def _short_condition(full_name: str) -> str:
-        """Map a PPT condition string like 'Near Mint 1st Edition' to 'NM'."""
-        for prefix, short in _CONDITION_PREFIXES:
-            if full_name.startswith(prefix):
-                return short
-        return full_name  # unknown condition — keep as-is
+    def _normalize_condition(raw: str) -> str:
+        if raw in CONDITION_MAP:
+            return CONDITION_MAP[raw]
+        # PPT sometimes appends the variant name to the condition string
+        # (e.g. "Near Mint 1st Edition"). Strip the suffix and retry.
+        for suffix in _CONDITION_SUFFIXES:
+            if raw.endswith(suffix):
+                base = raw[: -len(suffix)]
+                if base in CONDITION_MAP:
+                    return CONDITION_MAP[base]
+        log.warning("Unknown condition '%s' for card %s — storing as-is", raw, card_id)
+        return raw
 
-    prices = card.get("prices") or {}
-    variants = prices.get("variants")
+    def _normalize_variant(raw: str) -> str | None:
+        if raw in VARIANT_MAP:
+            return VARIANT_MAP[raw]
+        normalized = raw.lower().replace(" ", "_")
+        log.warning(
+            "Unknown variant '%s' for card %s — storing as '%s'", raw, card_id, normalized
+        )
+        return normalized
 
-    if isinstance(variants, dict) and variants:
-        # New format: per-printing / per-condition breakdown.
-        # Determine whether there are multiple distinct printings so we can
-        # decide whether to include the printing suffix in the label.
-        printing_names = list(variants.keys())
-        multi_printing = len(printing_names) > 1
+    # --- Historical + current prices from priceHistory.variants ---
+    #
+    # priceHistory is only present when includeHistory=true was sent.
+    # Each variant/condition bucket has a history array (one point per date)
+    # and a latestPrice for today's value.
 
-        for printing, conditions in variants.items():
-            if not isinstance(conditions, dict):
+    price_history = card.get("priceHistory") or {}
+    ph_variants = price_history.get("variants") or {}
+
+    history_point_count = 0
+
+    for variant_raw, conditions in ph_variants.items():
+        if not isinstance(conditions, dict):
+            continue
+        variant = _normalize_variant(variant_raw)
+
+        for condition_raw, cond_data in conditions.items():
+            if not isinstance(cond_data, dict):
                 continue
-            for condition_full, condition_data in conditions.items():
-                if not isinstance(condition_data, dict):
-                    continue
-                price = condition_data.get("price")
-                if price is None:
-                    continue
+            condition = _normalize_condition(condition_raw)
 
-                short_cond = _short_condition(condition_full)
-                label = f"{short_cond} ({printing})" if multi_printing else short_cond
-
+            # Historical rows — one per date point in the history array.
+            for point in cond_data.get("history") or []:
+                if not isinstance(point, dict):
+                    continue
+                market = point.get("market")
+                date_str = point.get("date", "")
+                date_str = date_str[:10] if date_str else None
+                if market is None or not date_str:
+                    continue
                 rows.append({
-                    "card_id": card_id,
-                    "source": "tcgplayer",
-                    "condition": label,
-                    "market_price": price,
-                    "low_price": None,
-                    "high_price": None,
+                    "card_id":       card_id,
+                    "source":        "tcgplayer",
+                    "condition":     condition,
+                    "variant":       variant,
+                    "market_price":  market,
+                    "low_price":     None,
+                    "high_price":    None,
+                    "captured_date": date_str,
+                })
+                history_point_count += 1
+
+            # Current price row from latestPrice — ensures today's price is
+            # written even if the history array doesn't include today's date.
+            latest = cond_data.get("latestPrice")
+            if latest is not None:
+                rows.append({
+                    "card_id":       card_id,
+                    "source":        "tcgplayer",
+                    "condition":     condition,
+                    "variant":       variant,
+                    "market_price":  latest,
+                    "low_price":     None,
+                    "high_price":    None,
                     "captured_date": None,  # None → CURRENT_DATE in INSERT
                 })
 
-    elif prices.get("market") is not None:
-        # Fallback: flat scalar market price, no per-condition breakdown.
-        rows.append({
-            "card_id": card_id,
-            "source": "tcgplayer",
-            "condition": "NM",
-            "market_price": prices["market"],
-            "low_price": prices.get("low"),
-            "high_price": prices.get("high"),
-            "captured_date": None,
-        })
+    if ph_variants:
+        variant_count = len(ph_variants)
+        cond_count = sum(
+            len(v) for v in ph_variants.values() if isinstance(v, dict)
+        )
+        log.debug(
+            "[%s] priceHistory: %d variant(s), %d condition(s), %d history points",
+            card_id, variant_count, cond_count, history_point_count,
+        )
+    else:
+        # priceHistory absent — fall back to current prices from prices.variants.
+        if price_history:
+            # priceHistory key exists but variants is empty/missing.
+            log.warning(
+                "Card %s: priceHistory present but variants is empty — current price only",
+                card_id,
+            )
+
+        prices = card.get("prices") or {}
+        pv = prices.get("variants")
+
+        if isinstance(pv, dict) and pv:
+            # per-printing / per-condition current prices.
+            for variant_raw, conditions in pv.items():
+                if not isinstance(conditions, dict):
+                    continue
+                variant = _normalize_variant(variant_raw)
+                for condition_raw, cond_data in conditions.items():
+                    if not isinstance(cond_data, dict):
+                        continue
+                    price = cond_data.get("price")
+                    if price is None:
+                        continue
+                    condition = _normalize_condition(condition_raw)
+                    rows.append({
+                        "card_id":       card_id,
+                        "source":        "tcgplayer",
+                        "condition":     condition,
+                        "variant":       variant,
+                        "market_price":  price,
+                        "low_price":     None,
+                        "high_price":    None,
+                        "captured_date": None,
+                    })
+
+        elif prices.get("market") is not None:
+            # Bare scalar fallback — free-tier or stripped response.
+            rows.append({
+                "card_id":       card_id,
+                "source":        "tcgplayer",
+                "condition":     "NM",
+                "variant":       None,
+                "market_price":  prices["market"],
+                "low_price":     prices.get("low"),
+                "high_price":    prices.get("high"),
+                "captured_date": None,
+            })
 
     # --- eBay / graded prices (API tier only) ---
     # ebay is a dict with keys like "psa10", "psa9", "bgs95" etc. Each value

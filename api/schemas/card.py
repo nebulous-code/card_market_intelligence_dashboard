@@ -42,6 +42,7 @@ class PriceSnapshotResponse(BaseModel):
     id: int
     source: str
     condition: str
+    variant: str | None
     market_price: Decimal | None
     low_price: Decimal | None
     high_price: Decimal | None

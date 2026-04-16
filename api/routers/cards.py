@@ -60,14 +60,15 @@ def get_card(card_id: str, db: Session = Depends(get_db)):
     # ingestion has not been implemented yet. It will be populated in
     # Milestone 2 via the eBay API. This is expected, not a bug.
 
-    # Deduplicate snapshots to keep only the latest one per condition.
-    # The relationship is already ordered by captured_at descending, so
-    # the first time we see a condition it is guaranteed to be the newest.
-    seen: set[str] = set()
+    # Deduplicate snapshots to keep only the latest one per (condition, variant)
+    # pair. The relationship is already ordered by captured_at descending, so
+    # the first time we see a combination it is guaranteed to be the newest.
+    seen: set[tuple] = set()
     latest_prices: list[PriceSnapshot] = []
     for snap in card.price_snapshots:
-        if snap.condition not in seen:
-            seen.add(snap.condition)
+        key = (snap.condition, snap.variant)
+        if key not in seen:
+            seen.add(key)
             latest_prices.append(snap)
 
     # Build and return the response object. model_validate reads all fields
@@ -88,7 +89,8 @@ def get_card(card_id: str, db: Session = Depends(get_db)):
 def get_price_history(
     card_id: str,
     source: Optional[str] = Query(None, description="Filter by price source (e.g. 'tcgplayer', 'psa')"),
-    condition: Optional[str] = Query(None, description="Filter by condition (e.g. 'NM', 'PSA-10')"),
+    condition: Optional[str] = Query(None, description="Filter by condition (e.g. 'NM', 'LP')"),
+    variant: Optional[str] = Query(None, description="Filter by variant (e.g. 'holofoil', '1st_edition_holofoil')"),
     db: Session = Depends(get_db),
 ):
     """
@@ -96,18 +98,20 @@ def get_price_history(
 
     Snapshots are ordered oldest-first so the caller can chart them in
     chronological order without any additional sorting. Optionally filtered
-    by source (e.g. "tcgplayer", "psa") and/or condition (e.g. "NM",
-    "PSA-10") to reduce response size for charts that show a single series.
+    by source, condition, and/or variant to reduce response size for charts
+    that show a single series.
 
     Args:
         card_id: The TCGdex card identifier from the URL path (e.g. "base1-4").
-        source: Optional query parameter to filter snapshots by price source.
-        condition: Optional query parameter to filter snapshots by condition.
+        source: Optional filter by price source (e.g. "tcgplayer", "psa").
+        condition: Optional filter by condition (e.g. "NM", "LP").
+        variant: Optional filter by printing variant (e.g. "holofoil",
+            "1st_edition_holofoil"). Omit to return all variants.
         db: Database session provided by FastAPI's dependency injection.
 
     Returns:
         PriceHistoryResponse: The card ID and a list of all matching
-            price snapshots ordered by captured_at ascending.
+            price snapshots ordered by captured_date ascending.
 
     Raises:
         HTTPException: 404 if no card with the given ID exists in the database.
@@ -123,7 +127,9 @@ def get_price_history(
         query = query.filter(PriceSnapshot.source == source)
     if condition:
         query = query.filter(PriceSnapshot.condition == condition)
-    snapshots = query.order_by(PriceSnapshot.captured_at.asc()).all()
+    if variant:
+        query = query.filter(PriceSnapshot.variant == variant)
+    snapshots = query.order_by(PriceSnapshot.captured_date.asc()).all()
 
     return PriceHistoryResponse(
         card_id=card_id,
