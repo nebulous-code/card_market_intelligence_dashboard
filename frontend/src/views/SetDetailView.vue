@@ -55,11 +55,35 @@
       </v-card-text>
     </v-card>
 
+    <!-- Filter status row: "Showing N of M" note + Clear Filters button -->
+    <div
+      v-if="hasActiveFilters"
+      class="d-flex align-center mb-3"
+    >
+      <div
+        v-if="filteredCards.length !== cardsWithPrices.length"
+        class="text-caption text-medium-emphasis"
+      >
+        Showing {{ filteredCards.length }} of {{ cardsWithPrices.length }} cards
+      </div>
+      <v-spacer />
+      <v-btn
+        variant="text"
+        prepend-icon="mdi-filter-off"
+        size="small"
+        @click="clearFilters"
+      >
+        Clear Filters
+      </v-btn>
+    </div>
+
     <!-- Card table -->
     <CardTable
-      :cards="cards"
-      :prices-by-card-id="pricesByCardId"
+      :filters="filters"
+      :cards="filteredCards"
+      :available-rarities="availableRarities"
       :loading="loadingCards"
+      @update:filters="onFiltersUpdate"
     />
   </div>
 </template>
@@ -76,8 +100,8 @@ import {
   LogarithmicScale,
   Tooltip,
 } from "chart.js";
-import { computed, inject, onMounted, onUnmounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { computed, inject, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { getCardsForSet, getSet, getSetCardPrices } from "../api/index.js";
 import CardTable from "../components/CardTable.vue";
 import EmptyState from "../components/EmptyState.vue";
@@ -125,6 +149,7 @@ const BoxPlot = defineComponent({
 });
 
 const route = useRoute();
+const router = useRouter();
 const setId = computed(() => route.params.setId);
 
 const setCrumb = inject('setCrumb', () => {})
@@ -136,21 +161,147 @@ const pricesByCardId = ref({});
 const loadingSet = ref(true);
 const loadingCards = ref(true);
 
+// --- Filter state ---
+//
+// Single reactive object covering every column-header filter. CardTable is the
+// only place these are read/written from the user's side (via v-model:filters).
+// The chart, table, and "Showing N of M" note all consume `filteredCards`.
+//
+// State is mirrored to the URL (so views are bookmarkable / shareable) and to
+// sessionStorage keyed by setId (so filters survive a breadcrumb round-trip
+// through a card detail page; URL is authoritative when both are present).
+const EMPTY_FILTERS = () => ({
+  name: "",
+  supertype: [],
+  rarity: [],
+  minPrice: null,
+  maxPrice: null,
+});
+const filters = reactive(EMPTY_FILTERS());
+
+const STORAGE_KEY = (id) => `setDetail:filters:${id}`;
+
+const hasActiveFilters = computed(
+  () =>
+    !!filters.name ||
+    filters.supertype.length > 0 ||
+    filters.rarity.length > 0 ||
+    filters.minPrice !== null ||
+    filters.maxPrice !== null
+);
+
+/**
+ * Build the URL-query object from the current filter state. Empty values are
+ * omitted so the URL stays clean. Multi-selects join with commas; numbers are
+ * stringified so router.replace receives a uniform string-only object.
+ */
+function buildQuery(f) {
+  const q = {};
+  if (f.name) q.name = f.name;
+  if (f.supertype?.length) q.supertype = f.supertype.join(",");
+  if (f.rarity?.length) q.rarity = f.rarity.join(",");
+  if (f.minPrice !== null && f.minPrice !== "") q.minPrice = String(f.minPrice);
+  if (f.maxPrice !== null && f.maxPrice !== "") q.maxPrice = String(f.maxPrice);
+  return q;
+}
+
+/**
+ * Mutate the `filters` reactive object in-place from a query-shaped source
+ * (route.query or a sessionStorage stash). Unknown keys are ignored; missing
+ * keys revert to their empty-state values so partial query strings work too.
+ */
+function applyFromQuery(src) {
+  filters.name = typeof src.name === "string" ? src.name : "";
+  filters.supertype = src.supertype ? String(src.supertype).split(",").filter(Boolean) : [];
+  filters.rarity = src.rarity ? String(src.rarity).split(",").filter(Boolean) : [];
+  filters.minPrice = src.minPrice != null && src.minPrice !== "" ? Number(src.minPrice) : null;
+  filters.maxPrice = src.maxPrice != null && src.maxPrice !== "" ? Number(src.maxPrice) : null;
+}
+
+function clearFilters() {
+  Object.assign(filters, EMPTY_FILTERS());
+  // The deep watcher will clear the URL and sessionStorage automatically.
+}
+
+/**
+ * Apply a filter-shape update from CardTable. Mutates the existing reactive
+ * object in-place rather than replacing it; the deep watcher then writes the
+ * URL and sessionStorage. Using Object.assign preserves the reactive proxy
+ * identity (a plain `filters = newVal` would break the watcher).
+ */
+function onFiltersUpdate(newFilters) {
+  Object.assign(filters, newFilters);
+}
+
 // Rarity sort order
 const RARITY_ORDER = ["Common", "Uncommon", "Rare", "Rare Holo"];
 
-const chartData = computed(() => {
-  if (!cards.value.length) return null;
-
-  // Group market prices by rarity
-  const groups = {};
-  for (const card of cards.value) {
-    const rarity = card.rarity ?? "Unknown";
+/**
+ * Merge each card with its NM market price (with legacy condition fallbacks).
+ * This used to live inside CardTable but is lifted here so the chart, the
+ * price-range filter, and the table all see the same shape.
+ */
+const cardsWithPrices = computed(() =>
+  cards.value.map((card) => {
     const prices = pricesByCardId.value[card.id] ?? [];
-    const snap = prices.find((p) => p.condition === "NM") ?? prices[0];
-    if (!snap?.market_price) continue;
+    const snap =
+      prices.find((p) => p.condition === "NM") ??
+      prices.find((p) => p.condition === "normal") ??
+      prices.find((p) => p.condition === "holofoil") ??
+      null;
+    return {
+      ...card,
+      market_price: snap?.market_price != null ? Number(snap.market_price) : null,
+    };
+  })
+);
+
+/**
+ * Distinct rarities present in the unfiltered list, alphabetized. Drives the
+ * Rarity filter dropdown options. Computed from `cardsWithPrices` (not
+ * `filteredCards`) so option list stays stable as filters narrow the table.
+ */
+const availableRarities = computed(() =>
+  [...new Set(cardsWithPrices.value.map((c) => c.rarity).filter(Boolean))].sort()
+);
+
+/**
+ * Apply the active filters to the merged-with-prices list. AND across filter
+ * keys, OR within each multi-select. Null prices are excluded only when a
+ * price bound is explicitly set.
+ */
+const filteredCards = computed(() => {
+  return cardsWithPrices.value.filter((card) => {
+    if (filters.name) {
+      const needle = filters.name.toLowerCase();
+      if (!card.name?.toLowerCase().includes(needle)) return false;
+    }
+    if (filters.supertype.length > 0 && !filters.supertype.includes(card.supertype)) {
+      return false;
+    }
+    if (filters.rarity.length > 0 && !filters.rarity.includes(card.rarity)) {
+      return false;
+    }
+    if (filters.minPrice !== null || filters.maxPrice !== null) {
+      if (card.market_price == null) return false;
+      if (filters.minPrice !== null && card.market_price < filters.minPrice) return false;
+      if (filters.maxPrice !== null && card.market_price > filters.maxPrice) return false;
+    }
+    return true;
+  });
+});
+
+const chartData = computed(() => {
+  if (!filteredCards.value.length) return null;
+
+  // Group market prices by rarity, sourced from the filtered list so the
+  // chart visually agrees with the table.
+  const groups = {};
+  for (const card of filteredCards.value) {
+    const rarity = card.rarity ?? "Unknown";
+    if (card.market_price == null) continue;
     if (!groups[rarity]) groups[rarity] = [];
-    groups[rarity].push(Number(snap.market_price));
+    groups[rarity].push(card.market_price);
   }
 
   if (Object.keys(groups).length === 0) return null;
@@ -259,7 +410,34 @@ async function loadCards() {
   }
 }
 
+/**
+ * Initialize filter state for the current setId. URL query is authoritative;
+ * if the URL has no filter params, fall back to whatever was last stashed in
+ * sessionStorage so a breadcrumb round-trip from a card detail page doesn't
+ * lose the user's filters.
+ */
+function initFiltersForCurrentSet() {
+  const q = route.query;
+  const urlHasFilters =
+    !!(q.name || q.supertype || q.rarity || q.minPrice || q.maxPrice);
+  if (urlHasFilters) {
+    applyFromQuery(q);
+    return;
+  }
+  const stashed = sessionStorage.getItem(STORAGE_KEY(setId.value));
+  if (stashed) {
+    try {
+      applyFromQuery(JSON.parse(stashed));
+      // Reflect restored filters in the URL so it stays the canonical source.
+      router.replace({ query: buildQuery(filters) });
+    } catch {
+      // Corrupt stash — ignore and fall through to empty state.
+    }
+  }
+}
+
 onMounted(() => {
+  initFiltersForCurrentSet();
   loadSet();
   loadCards();
 });
@@ -268,9 +446,32 @@ onUnmounted(() => {
   clearCrumbs();
 });
 
-watch(setId, () => {
+watch(setId, (newId, oldId) => {
   clearCrumbs();
+  // Filters are scoped to a set: changing sets resets the active state and
+  // re-initializes from the new URL/storage rather than carrying old values.
+  Object.assign(filters, EMPTY_FILTERS());
+  initFiltersForCurrentSet();
   loadSet();
   loadCards();
 });
+
+/**
+ * Mirror filter changes into the URL (replace, not push, so each keystroke
+ * does not flood the browser history) and into sessionStorage. The watcher
+ * fires after `clearFilters()` too, which is how we wipe both stores.
+ */
+watch(
+  filters,
+  (newFilters) => {
+    const query = buildQuery(newFilters);
+    router.replace({ query });
+    if (Object.keys(query).length === 0) {
+      sessionStorage.removeItem(STORAGE_KEY(setId.value));
+    } else {
+      sessionStorage.setItem(STORAGE_KEY(setId.value), JSON.stringify(query));
+    }
+  },
+  { deep: true }
+);
 </script>
