@@ -267,25 +267,45 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> dict
     Raises:
         Exception: Re-raises any exception from the database transaction.
     """
+    # Tracks raw variant/condition strings PPT sent that aren't in the canonical
+    # maps. Rows containing them are skipped by _build_snapshot_rows. Surfaced
+    # in the run-level summary so new mappings can be added when needed.
+    unknowns: dict[tuple[str, str], int] = {}
+
     stats: dict[str, Any] = {
         "ppt_total": len(ppt_cards),
         "matched": 0,
         "skipped": 0,
         "errors": 0,
         "skipped_cards": [],  # list of (card_id_or_number, name, reason)
+        "unknowns": unknowns,  # {(field, raw_value): count}
     }
 
     try:
         with Session(engine) as session:
             with session.begin():
+                # Load the canonical alias maps once per set ingest. These
+                # back the strict-mode normalize helpers in _build_snapshot_rows
+                # -- raw PPT strings missing from the alias tables produce a
+                # skipped row and an entry in `unknowns`.
+                aliases = _load_aliases(session)
+
                 # Build a mapping of card number -> (card_id, card_name).
                 # Also keep a sorted list of all known numbers for nearby-number hints.
+                #
+                # The lookup key is the unpadded card number (leading zeros
+                # stripped). TCGdex stores localId as zero-padded for some
+                # modern sets (e.g. sv03.5 "001") and unpadded for older ones
+                # ("1"), while PPT always returns zero-padded. Normalizing both
+                # sides to the same form keeps the loader agnostic to whatever
+                # convention TCGdex used for a given set.
                 rows_db = session.execute(
                     text("SELECT id, number, name FROM cards WHERE set_id = :set_id"),
                     {"set_id": set_id},
                 ).fetchall()
                 number_to_info: dict[str, tuple[str, str]] = {
-                    row.number: (row.id, row.name) for row in rows_db
+                    (row.number.lstrip("0") or "0"): (row.id, row.name)
+                    for row in rows_db
                 }
                 # Pre-sort numeric keys for nearby-number lookup on misses.
                 all_numbers_sorted = sorted(
@@ -322,7 +342,7 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> dict
                     card_id, db_name = info
 
                     try:
-                        snapshot_rows = _build_snapshot_rows(card_id, card)
+                        snapshot_rows = _build_snapshot_rows(card_id, card, aliases, unknowns)
                     except Exception as exc:
                         log.error("[%s] ERROR matching '%s' PPT#%s: %s", set_id, card_name, raw, exc)
                         stats["errors"] += 1
@@ -337,23 +357,7 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> dict
                         stats["skipped_cards"].append((card_id, card_name, "no price data"))
                         continue
 
-                    for row in snapshot_rows:
-                        session.execute(
-                            text("""
-                                INSERT INTO price_snapshots
-                                    (card_id, source, condition, variant, market_price, low_price, high_price,
-                                     captured_at, captured_date)
-                                VALUES
-                                    (:card_id, :source, :condition, :variant, :market_price, :low_price, :high_price,
-                                     NOW(), COALESCE(CAST(:captured_date AS date), CURRENT_DATE))
-                                ON CONFLICT (card_id, source, condition, variant, captured_date) DO UPDATE SET
-                                    market_price = EXCLUDED.market_price,
-                                    low_price    = EXCLUDED.low_price,
-                                    high_price   = EXCLUDED.high_price,
-                                    captured_at  = EXCLUDED.captured_at
-                            """),
-                            row,
-                        )
+                    _bulk_insert_snapshots(session, snapshot_rows)
 
                     # Log a DEBUG summary for this card.
                     variants_in_rows = len({r.get("variant") for r in snapshot_rows})
@@ -403,7 +407,100 @@ def _nearby_numbers(
     return [x for x in by_distance if x != target][:n]
 
 
-def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, Any]]:
+def _bulk_insert_snapshots(session: Session, rows: list[dict[str, Any]]) -> None:
+    """
+    Insert all snapshot rows for one card with a single multi-row INSERT.
+
+    Each `session.execute()` is a round-trip to the database, and the cards
+    in PPT's API tier produce ~900 rows per card (178 history points × several
+    variants and conditions). Sending those one row at a time over a WAN link
+    to a cloud Postgres makes the transaction take long enough to time out
+    before any data is committed. Batching collapses each card to a single
+    network call.
+
+    Postgres caps bind parameters at 65535 per statement. With 7 params per
+    row, that's ~9300 rows per statement -- comfortably above realistic
+    per-card row counts -- but we chunk anyway as a safety net.
+    """
+    if not rows:
+        return
+
+    PARAMS_PER_ROW = 7
+    MAX_ROWS_PER_STMT = 60000 // PARAMS_PER_ROW  # ~8500
+
+    for chunk_start in range(0, len(rows), MAX_ROWS_PER_STMT):
+        chunk = rows[chunk_start:chunk_start + MAX_ROWS_PER_STMT]
+        placeholders = []
+        params: dict[str, Any] = {}
+        for i, r in enumerate(chunk):
+            placeholders.append(
+                f"(:card_id_{i}, :source_{i}, :condition_{i}, :variant_{i}, "
+                f":market_price_{i}, :low_price_{i}, :high_price_{i}, "
+                f"NOW(), COALESCE(CAST(:captured_date_{i} AS date), CURRENT_DATE))"
+            )
+            params[f"card_id_{i}"]       = r["card_id"]
+            params[f"source_{i}"]        = r["source"]
+            params[f"condition_{i}"]     = r["condition"]
+            params[f"variant_{i}"]       = r.get("variant")
+            params[f"market_price_{i}"]  = r["market_price"]
+            params[f"low_price_{i}"]     = r.get("low_price")
+            params[f"high_price_{i}"]    = r.get("high_price")
+            params[f"captured_date_{i}"] = r.get("captured_date")
+
+        session.execute(
+            text(f"""
+                INSERT INTO price_snapshots
+                    (card_id, source, condition, variant, market_price, low_price, high_price,
+                     captured_at, captured_date)
+                VALUES {", ".join(placeholders)}
+                ON CONFLICT (card_id, source, condition, variant, captured_date) DO UPDATE SET
+                    market_price = EXCLUDED.market_price,
+                    low_price    = EXCLUDED.low_price,
+                    high_price   = EXCLUDED.high_price,
+                    captured_at  = EXCLUDED.captured_at
+            """),
+            params,
+        )
+
+
+# Sentinel returned by the normalizers when the raw PPT value isn't in the
+# alias tables. The row builder uses identity comparison (`is _UNKNOWN`) to
+# decide whether to skip the row, so this works even though variants can
+# legitimately be None.
+_UNKNOWN = object()
+
+
+def _load_aliases(session: Session) -> dict[str, dict[str, str | None]]:
+    """
+    Load condition_aliases and variant_aliases into in-memory dicts.
+
+    Called once per ingestion run before processing any cards. The two
+    nested dicts power the normalize helpers in `_build_snapshot_rows`.
+
+    Returns:
+        {
+            "condition": {"Near Mint": "NM", "psa10": "PSA-10", ...},
+            "variant":   {"Holofoil": "holofoil", "Normal": None, ...},
+        }
+    """
+    cond_rows = session.execute(
+        text("SELECT raw_value, canonical_value FROM condition_aliases")
+    ).fetchall()
+    variant_rows = session.execute(
+        text("SELECT raw_value, canonical_value FROM variant_aliases")
+    ).fetchall()
+    return {
+        "condition": {r.raw_value: r.canonical_value for r in cond_rows},
+        "variant":   {r.raw_value: r.canonical_value for r in variant_rows},
+    }
+
+
+def _build_snapshot_rows(
+    card_id: str,
+    card: dict[str, Any],
+    aliases: dict[str, dict[str, str | None]],
+    unknowns: dict[tuple[str, str], int] | None = None,
+) -> list[dict[str, Any]]:
     """
     Convert a single PokemonPriceTracker card object into snapshot row dicts.
 
@@ -432,69 +529,35 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
     Args:
         card_id: The internal card ID in our database (matched by card number).
         card: The card object from the PokemonPriceTracker API response.
+        unknowns: Optional accumulator for non-canonical (variant/condition)
+            strings encountered. Maps (field, raw_value) -> count. Surfaced in
+            the run summary so new mappings can be added when needed.
 
     Returns:
         list[dict]: One dict per row, ready to pass as SQL parameters.
     """
     rows: list[dict[str, Any]] = []
+    if unknowns is None:
+        unknowns = {}
 
-    # --- Condition and variant normalization maps ---
+    cond_aliases = aliases["condition"]
+    variant_aliases = aliases["variant"]
 
-    CONDITION_MAP = {
-        "Near Mint":         "NM",
-        "Lightly Played":    "LP",
-        "Moderately Played": "MP",
-        "Heavily Played":    "HP",
-        "Damaged":           "DMG",
-    }
+    def _normalize_condition(raw: str):
+        # Variant strings (e.g. " 1st Edition Holofoil") that PPT bleeds into
+        # the condition string are pre-seeded as condition_aliases rows by
+        # migration 008 -- so a single dict lookup covers both plain and
+        # suffixed forms. New spellings show up as unknowns to be added later.
+        if raw in cond_aliases:
+            return cond_aliases[raw]
+        unknowns[("condition", raw)] = unknowns.get(("condition", raw), 0) + 1
+        return _UNKNOWN
 
-    # PPT variant strings → normalized DB values.
-    # None means no variant distinction (standard/unlimited printing) — stored as NULL.
-    VARIANT_MAP = {
-        "Holofoil":             "holofoil",
-        "1st Edition Holofoil": "1st_edition_holofoil",
-        "Reverse Holofoil":     "reverse_holofoil",
-        "Normal":               None,
-        "1st Edition Normal":   "1st_edition_normal",
-        # Older sets (Base Set, Jungle, Fossil, Base Set 2) use bare printing labels.
-        "1st Edition":          "1st_edition",
-        "Unlimited":            "unlimited",
-    }
-
-    # Suffixes PPT sometimes appends to the condition key when variant info
-    # bleeds into the condition string (e.g. "Near Mint 1st Edition").
-    # Listed longest-first so more-specific matches are tried before shorter ones.
-    _CONDITION_SUFFIXES = [
-        " 1st Edition Holofoil",
-        " Reverse Holofoil",
-        " 1st Edition Normal",
-        " 1st Edition",
-        " Holofoil",
-        " Unlimited",
-        " Normal",
-    ]
-
-    def _normalize_condition(raw: str) -> str:
-        if raw in CONDITION_MAP:
-            return CONDITION_MAP[raw]
-        # PPT sometimes appends the variant name to the condition string
-        # (e.g. "Near Mint 1st Edition"). Strip the suffix and retry.
-        for suffix in _CONDITION_SUFFIXES:
-            if raw.endswith(suffix):
-                base = raw[: -len(suffix)]
-                if base in CONDITION_MAP:
-                    return CONDITION_MAP[base]
-        log.warning("Unknown condition '%s' for card %s — storing as-is", raw, card_id)
-        return raw
-
-    def _normalize_variant(raw: str) -> str | None:
-        if raw in VARIANT_MAP:
-            return VARIANT_MAP[raw]
-        normalized = raw.lower().replace(" ", "_")
-        log.warning(
-            "Unknown variant '%s' for card %s — storing as '%s'", raw, card_id, normalized
-        )
-        return normalized
+    def _normalize_variant(raw: str):
+        if raw in variant_aliases:
+            return variant_aliases[raw]
+        unknowns[("variant", raw)] = unknowns.get(("variant", raw), 0) + 1
+        return _UNKNOWN
 
     # --- Historical + current prices from priceHistory.variants ---
     #
@@ -511,11 +574,15 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
         if not isinstance(conditions, dict):
             continue
         variant = _normalize_variant(variant_raw)
+        if variant is _UNKNOWN:
+            continue  # Skip every row in this variant bucket.
 
         for condition_raw, cond_data in conditions.items():
             if not isinstance(cond_data, dict):
                 continue
             condition = _normalize_condition(condition_raw)
+            if condition is _UNKNOWN:
+                continue  # Skip history + latestPrice rows for this condition.
 
             # Historical rows — one per date point in the history array.
             for point in cond_data.get("history") or []:
@@ -580,6 +647,8 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
                 if not isinstance(conditions, dict):
                     continue
                 variant = _normalize_variant(variant_raw)
+                if variant is _UNKNOWN:
+                    continue
                 for condition_raw, cond_data in conditions.items():
                     if not isinstance(cond_data, dict):
                         continue
@@ -587,6 +656,8 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
                     if price is None:
                         continue
                     condition = _normalize_condition(condition_raw)
+                    if condition is _UNKNOWN:
+                        continue
                     rows.append({
                         "card_id":       card_id,
                         "source":        "tcgplayer",
@@ -613,36 +684,40 @@ def _build_snapshot_rows(card_id: str, card: dict[str, Any]) -> list[dict[str, A
 
     # --- eBay / graded prices (API tier only) ---
     # ebay is a dict with keys like "psa10", "psa9", "bgs95" etc. Each value
-    # is {"avg": float}. We store each grade as a separate row with the grade
-    # as the condition and the grading company as the source.
+    # is {"avg": float}. The raw API key is normalized through the same
+    # condition_aliases lookup the rest of the loader uses, keeping the
+    # canonical/display pipeline uniform across all condition sources.
+    # The grading company is encoded in the key prefix and stored as `source`.
     ebay = card.get("ebay", {})
-    grade_map = {
-        # key in API response -> (source, condition label)
-        "psa10": ("psa", "PSA-10"),
-        "psa9": ("psa", "PSA-9"),
-        "psa8": ("psa", "PSA-8"),
-        "bgs10": ("bgs", "BGS-10"),
-        "bgs95": ("bgs", "BGS-9.5"),
-        "bgs9": ("bgs", "BGS-9"),
-        "cgc10": ("cgc", "CGC-10"),
-        "cgc95": ("cgc", "CGC-9.5"),
-        "cgc9": ("cgc", "CGC-9"),
-    }
-    for api_key, (source, condition_label) in grade_map.items():
-        grade_data = ebay.get(api_key)
-        if not grade_data:
+    for api_key, grade_data in ebay.items():
+        if not isinstance(grade_data, dict):
             continue
         avg = grade_data.get("avg")
         if avg is None:
             continue
+        condition = _normalize_condition(api_key)
+        if condition is _UNKNOWN:
+            continue
+        # Source = "psa" / "bgs" / "cgc" derived from the api_key prefix.
+        # Falls back to "ebay" when the prefix isn't a known grader so a
+        # surprise key still produces a usable row once an alias is added.
+        if api_key.startswith("psa"):
+            source = "psa"
+        elif api_key.startswith("bgs"):
+            source = "bgs"
+        elif api_key.startswith("cgc"):
+            source = "cgc"
+        else:
+            source = "ebay"
         rows.append({
-            "card_id": card_id,
-            "source": source,
-            "condition": condition_label,
+            "card_id":      card_id,
+            "source":       source,
+            "condition":    condition,
+            "variant":      None,
             "market_price": avg,
-            "low_price": None,
-            "high_price": None,
-            "captured_date": None,  # None → use CURRENT_DATE in the INSERT
+            "low_price":    None,
+            "high_price":   None,
+            "captured_date": None,
         })
 
     return rows

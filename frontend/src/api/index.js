@@ -108,3 +108,26 @@ export async function getPriceHistory(cardId, filters = {}) {
   const { data } = await http.get(`/cards/${cardId}/price-history`, { params: filters });
   return data;
 }
+
+/**
+ * Fetch the canonical condition list (NM, LP, ..., PSA-10, ...) with display
+ * labels and sort order. Used to populate filter dropdowns without hardcoding
+ * the labels in the frontend.
+ *
+ * @returns {Promise<Array<{value: string, label: string, display_order: number}>>}
+ */
+export async function getReferenceConditions() {
+  const { data } = await http.get("/reference/conditions");
+  return data;
+}
+
+/**
+ * Fetch the canonical variant list (Standard, Holofoil, 1st Ed. Holo, ...).
+ * The Standard row has value=null.
+ *
+ * @returns {Promise<Array<{value: string|null, label: string, display_order: number}>>}
+ */
+export async function getReferenceVariants() {
+  const { data } = await http.get("/reference/variants");
+  return data;
+}

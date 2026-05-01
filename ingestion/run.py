@@ -55,6 +55,35 @@ def _bool_env(key: str, default: bool = False) -> bool:
     return os.environ.get(key, str(default)).strip().lower() == "true"
 
 
+def _format_unknowns(unknowns: dict[tuple[str, str], int]) -> str:
+    """
+    Format the unknown variant/condition collector as a copy-pasteable list
+    of INSERT statements plus a row-skipped count. Returns "  (none)" when
+    every raw value PPT sent was recognised.
+    """
+    if not unknowns:
+        return "  (none)"
+
+    table_for_field = {
+        "condition": "condition_aliases",
+        "variant":   "variant_aliases",
+    }
+    lines: list[str] = []
+    # Sort by field then count desc so the most impactful unknowns surface first.
+    for (field, raw), count in sorted(
+        unknowns.items(), key=lambda kv: (kv[0][0], -kv[1])
+    ):
+        table = table_for_field.get(field, f"{field}_aliases")
+        # The raw value is wrapped in $$ ... $$ so it is safe to copy-paste
+        # even if it contains apostrophes.
+        lines.append(
+            f"  [{field}] {raw!r}  ({count} row{'s' if count != 1 else ''} skipped)\n"
+            f"     INSERT INTO {table} (raw_value, canonical_value)\n"
+            f"     VALUES ($${raw}$$, '<choose canonical>');"
+        )
+    return "\n".join(lines)
+
+
 def main() -> None:
     """
     Orchestrate the nightly price ingestion run.
@@ -65,10 +94,6 @@ def main() -> None:
       3. For each set, call PokemonPriceTracker and insert price snapshots.
       4. Update the watermark for the set on success.
       5. Stop gracefully if the daily credit limit is running low.
-
-    Sets that have already been backfilled are fetched with current prices
-    only on subsequent runs. Sets that have not yet been backfilled are
-    fetched with full history on the first run (API tier only).
 
     Returns:
         None
@@ -112,6 +137,10 @@ def main() -> None:
     run_total_errors = 0
     run_set_lines: list[str] = []      # per-set breakdown lines for the summary
     run_warning_lines: list[str] = []  # skipped-card detail lines for the summary
+    # Aggregates raw condition/variant strings PPT sent that aren't in the
+    # alias tables. Maps (field, raw_value) -> total skipped-row count across
+    # all sets in the run. Surfaced in the run summary as INSERT snippets.
+    run_unknowns: dict[tuple[str, str], int] = {}
 
     for set_info in sets:
         set_id = set_info["id"]
@@ -128,7 +157,7 @@ def main() -> None:
             sets_skipped += 1
             continue
 
-        # Check whether this set needs a backfill or just a current-price run.
+        # Check watermark for pagination resume offset.
         with Session(engine) as session:
             watermark = None
             try:
@@ -137,15 +166,11 @@ def main() -> None:
             except Exception:
                 pass  # First run -- no watermark exists yet.
 
-        already_backfilled = watermark.get("backfilled", False) if watermark else False
         start_offset = watermark.get("last_offset", 0) if watermark else 0
         if start_offset > 0:
             log.info("Watermark found for set %s at offset=%d -- resuming.", set_id, start_offset)
 
-        # Determine whether to include history on this run.
-        # On the API tier (include_history=True), pull history on the first run
-        # per set. On subsequent runs, history accumulates from daily snapshots.
-        run_with_history = include_history and not already_backfilled
+        run_with_history = include_history
         run_with_ebay = include_ebay
 
         try:
@@ -201,20 +226,15 @@ def main() -> None:
         for cid, name, reason in stats["skipped_cards"]:
             run_warning_lines.append(f"  [{set_id}] {cid} ({name}) — {reason}")
 
-        # Update the watermark with the next offset.
-        # next_offset=0 means the full set completed; any other value means
-        # the run was interrupted and the next run should resume from there.
-        # Only mark backfilled=True when the set fully completed this run
-        # (next_offset=0 means no more pages). If the run was interrupted
-        # mid-set, keep backfilled=False so the next resume still requests
-        # history for the remaining cards.
-        set_completed = next_offset == 0
+        # Merge per-set unknown variant/condition counts into the run total.
+        for key, count in (stats.get("unknowns") or {}).items():
+            run_unknowns[key] = run_unknowns.get(key, 0) + count
+
         with Session(engine) as session:
             with session.begin():
                 set_watermark(
                     session,
                     set_id,
-                    backfilled=run_with_history and set_completed,
                     last_offset=next_offset,
                 )
         if next_offset == 0:
@@ -246,6 +266,7 @@ def main() -> None:
 
     warnings_section = "\n".join(run_warning_lines) if run_warning_lines else "  (none)"
     per_set_section = "\n".join(run_set_lines) if run_set_lines else "  (no sets processed)"
+    unknowns_section = _format_unknowns(run_unknowns)
 
     sep = "═" * 45
     summary = (
@@ -258,6 +279,7 @@ def main() -> None:
         f"  Overall status : {overall_status}\n"
         f"\nPer-set breakdown:\n{per_set_section}\n"
         f"\nWarnings:\n{warnings_section}\n"
+        f"\nUnrecognized values (rows skipped, add aliases to capture):\n{unknowns_section}\n"
         f"{sep}"
     )
     log.info("%s", summary)

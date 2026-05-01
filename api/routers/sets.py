@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.set import Set
 from models.card import Card, PriceSnapshot
+from routers.cards import _label_maps, _to_snapshot_response
 from schemas.card import CardResponse, PriceSnapshotResponse, SetCardPricesResponse
 from schemas.set import SetResponse
 
@@ -192,9 +193,10 @@ def get_prices_for_set(set_id: str, db: Session = Depends(get_db)):
             seen[cid].add(snap.condition)
             prices.setdefault(cid, []).append(snap)
 
+    cond_labels, variant_labels = _label_maps(db)
     return SetCardPricesResponse(
         prices={
-            cid: [PriceSnapshotResponse.model_validate(s) for s in snaps]
+            cid: [_to_snapshot_response(s, cond_labels, variant_labels) for s in snaps]
             for cid, snaps in prices.items()
         }
     )

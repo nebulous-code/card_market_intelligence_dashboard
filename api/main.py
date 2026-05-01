@@ -19,8 +19,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import the two sets of URL routes: one for sets, one for cards.
-from routers import cards, sets
+# Import the URL route groups: sets, cards, and reference data.
+from routers import cards, reference, sets
 
 
 @asynccontextmanager
@@ -97,8 +97,9 @@ app.add_middleware(
 
 # Register the route groups with the application.
 # Each router is a collection of related URL endpoints defined in its own file.
-app.include_router(sets.router)   # handles /sets and /sets/{id}/cards
-app.include_router(cards.router)  # handles /cards/{id}
+app.include_router(sets.router)       # handles /sets and /sets/{id}/cards
+app.include_router(cards.router)      # handles /cards/{id}
+app.include_router(reference.router)  # handles /reference/conditions, /reference/variants
 
 
 @app.get("/", include_in_schema=False)

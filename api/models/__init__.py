@@ -7,9 +7,25 @@ imports Alembic would not know about the models and could not generate
 or apply migrations correctly.
 """
 
+from models.canonical import (
+    CanonicalCondition,
+    CanonicalVariant,
+    ConditionAlias,
+    VariantAlias,
+)
 from models.card import Card, PriceSnapshot
 from models.set import Set
 from models.set_identifier import SetIdentifier
 from models.watermark import IngestionWatermark
 
-__all__ = ["Set", "Card", "PriceSnapshot", "IngestionWatermark", "SetIdentifier"]
+__all__ = [
+    "Set",
+    "Card",
+    "PriceSnapshot",
+    "IngestionWatermark",
+    "SetIdentifier",
+    "CanonicalCondition",
+    "CanonicalVariant",
+    "ConditionAlias",
+    "VariantAlias",
+]

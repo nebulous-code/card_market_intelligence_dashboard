@@ -16,12 +16,47 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
+from models.canonical import CanonicalCondition, CanonicalVariant
 from models.card import Card, PriceSnapshot
-from models.set import Set
 from schemas.card import CardDetailResponse, PriceHistoryResponse, PriceSnapshotResponse
 
 # Create a router for the /cards URL prefix.
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+
+def _label_maps(db: Session) -> tuple[dict[str, str], dict[str | None, str]]:
+    """
+    Load the two canonical label dicts once per request.
+
+    Returns (condition_label_by_value, variant_label_by_value). Each map
+    falls back to the raw value if a snapshot row contains a value that
+    isn't in the canonical table (shouldn't happen post-FK, but keeps
+    the response stable if a row is somehow stale).
+    """
+    cond = {row.value: row.display_label for row in db.query(CanonicalCondition).all()}
+    var = {row.value: row.display_label for row in db.query(CanonicalVariant).all()}
+    return cond, var
+
+
+def _to_snapshot_response(
+    snap: PriceSnapshot,
+    cond_labels: dict[str, str],
+    variant_labels: dict[str | None, str],
+) -> PriceSnapshotResponse:
+    """Build a PriceSnapshotResponse with display labels stamped in."""
+    return PriceSnapshotResponse(
+        id=snap.id,
+        source=snap.source,
+        condition=snap.condition,
+        condition_label=cond_labels.get(snap.condition, snap.condition),
+        variant=snap.variant,
+        variant_label=variant_labels.get(snap.variant, snap.variant or "Standard"),
+        market_price=snap.market_price,
+        low_price=snap.low_price,
+        high_price=snap.high_price,
+        captured_at=snap.captured_at,
+        captured_date=snap.captured_date,
+    )
 
 
 @router.get("/{card_id}", response_model=CardDetailResponse)
@@ -71,14 +106,15 @@ def get_card(card_id: str, db: Session = Depends(get_db)):
             seen.add(key)
             latest_prices.append(snap)
 
-    # Build and return the response object. model_validate reads all fields
-    # declared on CardDetailResponse directly from the ORM object, so adding
-    # a new column to the model and schema is sufficient -- this line never
-    # needs to change.
+    cond_labels, variant_labels = _label_maps(db)
+
     return CardDetailResponse.model_validate(
         {
             **card.__dict__,
-            "latest_prices": [PriceSnapshotResponse.model_validate(s) for s in latest_prices],
+            "latest_prices": [
+                _to_snapshot_response(s, cond_labels, variant_labels)
+                for s in latest_prices
+            ],
             "set_display_name": card.set.name if card.set else card.set_id,
             "set_printed_total": card.set.printed_total if card.set else 0,
         }
@@ -127,11 +163,19 @@ def get_price_history(
         query = query.filter(PriceSnapshot.source == source)
     if condition:
         query = query.filter(PriceSnapshot.condition == condition)
-    if variant:
+    if variant == "__none__":
+        # Sentinel sent by the UI to filter for cards with no printing variant
+        # (e.g. modern non-holos stored with variant=NULL). Treated separately
+        # because variant=NULL can't be matched with `== None` in SQL.
+        query = query.filter(PriceSnapshot.variant.is_(None))
+    elif variant:
         query = query.filter(PriceSnapshot.variant == variant)
     snapshots = query.order_by(PriceSnapshot.captured_date.asc()).all()
 
+    cond_labels, variant_labels = _label_maps(db)
     return PriceHistoryResponse(
         card_id=card_id,
-        snapshots=[PriceSnapshotResponse.model_validate(s) for s in snapshots],
+        snapshots=[
+            _to_snapshot_response(s, cond_labels, variant_labels) for s in snapshots
+        ],
     )
