@@ -1,0 +1,64 @@
+# Python test suite -- runs on every push and PR.
+#
+# Required check on PRs to main/dev once the suite reaches 100% coverage.
+# Provides a Postgres 16 service container that mirrors the Neon prod
+# database; alembic migrations run against it once per workflow.
+#
+# tools/test.sh --no-docker is what runs the actual pytest invocation; it
+# skips its own docker-compose Postgres because GitHub Actions provides
+# Postgres via the `services` block below.
+
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  pytest:
+    name: pytest + 100% branch coverage
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: card_market_test
+        ports:
+          - 5433:5432
+        # GitHub's services block doesn't accept a `healthcheck` array the
+        # same way docker-compose does -- options is the right key here.
+        options: >-
+          --health-cmd "pg_isready -U test -d card_market_test"
+          --health-interval 1s
+          --health-timeout 5s
+          --health-retries 30
+
+    env:
+      TEST_DATABASE_URL: postgresql://test:test@localhost:5433/card_market_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Run tests
+        run: tools/test.sh --no-docker
+
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov/
+          if-no-files-found: ignore

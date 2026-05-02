@@ -22,3 +22,4 @@ Thumbs.db
 # Logs
 *.log
 docs/milestone_1_code_review.md
+.coverage
