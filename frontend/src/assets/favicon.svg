@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Dark navy background -->
+  <rect width="32" height="32" rx="6" fill="#12121F"/>
+
+  <!-- Three bars at increasing heights -->
+  <!-- Bar 1: shortest, Magikarp red -->
+  <rect x="6"  y="18" width="5" height="9"  rx="1" fill="#E8412A"/>
+
+  <!-- Bar 2: medium, Magikarp gold -->
+  <rect x="13.5" y="13" width="5" height="14" rx="1" fill="#F5C842"/>
+
+  <!-- Bar 3: tallest, Magikarp red -->
+  <rect x="21" y="7"  width="5" height="20" rx="1" fill="#E8412A"/>
+</svg>
