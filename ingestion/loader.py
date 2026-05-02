@@ -141,7 +141,20 @@ def upsert_set(session: Session, set_data: dict[str, Any]) -> None:
     log.debug("upsert_set executed OK for set_id=%s", params["id"])
 
 
-def upsert_card(session: Session, card_data: dict[str, Any]) -> None:
+def _load_rarity_aliases(session: Session) -> dict[str, str]:
+    """Load rarity_aliases as a {raw_value: canonical_value} dict."""
+    rows = session.execute(
+        text("SELECT raw_value, canonical_value FROM rarity_aliases")
+    ).fetchall()
+    return {r.raw_value: r.canonical_value for r in rows}
+
+
+def upsert_card(
+    session: Session,
+    card_data: dict[str, Any],
+    rarity_aliases: dict[str, str] | None = None,
+    unknowns: dict[tuple[str, str], int] | None = None,
+) -> None:
     """
     Insert a new card row or update it if one already exists.
 
@@ -153,6 +166,12 @@ def upsert_card(session: Session, card_data: dict[str, Any]) -> None:
     Args:
         session: The active database session to execute the query on.
         card_data: The full card object returned by the TCGdex API.
+        rarity_aliases: Mapping of raw TCGdex rarity strings to canonical
+            values from rarity_aliases. Required since migration 009 added
+            an FK on cards.rarity. Pass {} to skip alias normalization
+            (only valid when there is genuinely no alias table yet).
+        unknowns: Optional accumulator for unrecognized rarity strings.
+            Maps (field, raw_value) -> count. Surfaced in the run summary.
 
     Returns:
         None
@@ -162,12 +181,30 @@ def upsert_card(session: Session, card_data: dict[str, Any]) -> None:
     image_base = card_data.get("image")
     image_url = f"{image_base}/low.png" if image_base else None
 
+    raw_rarity = card_data.get("rarity")
+    if raw_rarity is None:
+        canonical_rarity = None
+    elif rarity_aliases is None or raw_rarity in (rarity_aliases or {}):
+        canonical_rarity = (rarity_aliases or {}).get(raw_rarity, raw_rarity)
+    else:
+        # Unknown raw rarity. Insert NULL rather than blow up the FK; the
+        # run summary surfaces the unknown so an alias row can be added.
+        log.warning(
+            "Unknown rarity '%s' on card %s — inserting NULL. Add a "
+            "rarity_aliases row to capture it.",
+            raw_rarity, card_data.get("id"),
+        )
+        if unknowns is not None:
+            key = ("rarity", raw_rarity)
+            unknowns[key] = unknowns.get(key, 0) + 1
+        canonical_rarity = None
+
     params = {
         "id": card_data["id"],
         "set_id": card_data["set"]["id"],   # the card's parent set ID
         "name": card_data["name"],
         "number": card_data["localId"],     # TCGdex uses "localId" for card number
-        "rarity": card_data.get("rarity"),
+        "rarity": canonical_rarity,
         "supertype": card_data.get("category"),  # TCGdex uses "category" for supertype
         "image_url": image_url,
     }
@@ -191,7 +228,7 @@ def upsert_card(session: Session, card_data: dict[str, Any]) -> None:
     log.debug("upsert_card executed OK for card_id=%s", params["id"])
 
 
-def load_set(set_data: dict[str, Any], cards: list[dict[str, Any]]) -> None:
+def load_set(set_data: dict[str, Any], cards: list[dict[str, Any]]) -> dict[str, Any]:
     """
     Write a complete set and all its cards to the database in one transaction.
 
@@ -206,7 +243,10 @@ def load_set(set_data: dict[str, Any], cards: list[dict[str, Any]]) -> None:
         cards: The list of full card objects returned by tcgdex.get_cards().
 
     Returns:
-        None
+        dict with keys:
+            cards_upserted -- number of cards written
+            unknowns       -- {(field, raw_value): count} for rarity strings
+                              not in rarity_aliases. Empty on a clean run.
 
     Raises:
         Exception: Re-raises any exception that occurs during the transaction
@@ -214,9 +254,15 @@ def load_set(set_data: dict[str, Any], cards: list[dict[str, Any]]) -> None:
     """
     log.info("Beginning database transaction for set %s (%s)", set_data["id"], set_data["name"])
 
+    unknowns: dict[tuple[str, str], int] = {}
+
     try:
         with Session(engine) as session:
             with session.begin():
+                # Load the rarity alias map once per set ingest. Backs the
+                # canonical-rewrite logic in upsert_card.
+                rarity_aliases = _load_rarity_aliases(session)
+
                 # Write the set row first because cards reference it via
                 # foreign key -- the set must exist before cards can be inserted.
                 log.info("Upserting set: %s (%s)", set_data["id"], set_data["name"])
@@ -226,7 +272,7 @@ def load_set(set_data: dict[str, Any], cards: list[dict[str, Any]]) -> None:
                 # Write each card row. All cards are in the same transaction
                 # as the set, so they will all be committed or rolled back together.
                 for card in cards:
-                    upsert_card(session, card)
+                    upsert_card(session, card, rarity_aliases, unknowns)
 
                 log.info("Transaction committing -- %d cards upserted", len(cards))
 
@@ -238,6 +284,8 @@ def load_set(set_data: dict[str, Any], cards: list[dict[str, Any]]) -> None:
         # so the calling script knows the ingestion failed.
         log.exception("Transaction failed and was rolled back: %s", e)
         raise
+
+    return {"cards_upserted": len(cards), "unknowns": unknowns}
 
 
 def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> dict[str, Any]:

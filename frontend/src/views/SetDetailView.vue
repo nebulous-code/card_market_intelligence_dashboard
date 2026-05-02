@@ -102,7 +102,12 @@ import {
 } from "chart.js";
 import { computed, inject, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { getCardsForSet, getSet, getSetCardPrices } from "../api/index.js";
+import {
+  getCardsForSet,
+  getReferenceRarities,
+  getSet,
+  getSetCardPrices,
+} from "../api/index.js";
 import CardTable from "../components/CardTable.vue";
 import EmptyState from "../components/EmptyState.vue";
 import { formatCompactCurrency, formatCurrency, formatDate, formatNumber } from "../utils/formatters.js";
@@ -160,6 +165,11 @@ const cards = ref([]);
 const pricesByCardId = ref({});
 const loadingSet = ref(true);
 const loadingCards = ref(true);
+
+// Canonical rarity reference list (rarest-first by display_order). Drives the
+// rarity dropdown options and the box-and-whisker column ordering. Fetched
+// once on mount; the list is small and changes only on a migration.
+const rarityRef = ref([]);
 
 // --- Filter state ---
 //
@@ -233,9 +243,6 @@ function onFiltersUpdate(newFilters) {
   Object.assign(filters, newFilters);
 }
 
-// Rarity sort order
-const RARITY_ORDER = ["Common", "Uncommon", "Rare", "Rare Holo"];
-
 /**
  * Merge each card with its NM market price (with legacy condition fallbacks).
  * This used to live inside CardTable but is lifted here so the chart, the
@@ -257,13 +264,33 @@ const cardsWithPrices = computed(() =>
 );
 
 /**
- * Distinct rarities present in the unfiltered list, alphabetized. Drives the
- * Rarity filter dropdown options. Computed from `cardsWithPrices` (not
- * `filteredCards`) so option list stays stable as filters narrow the table.
+ * Distinct rarities present in the unfiltered list, returned as
+ * [{value, title}] objects rarest-first. The `value` is the canonical key
+ * stored on cards.rarity (e.g. "common") and the `title` is the display
+ * label from canonical_rarities ("Common"). Computed from `cardsWithPrices`
+ * (not `filteredCards`) so the option list stays stable as filters narrow
+ * the table.
  */
-const availableRarities = computed(() =>
-  [...new Set(cardsWithPrices.value.map((c) => c.rarity).filter(Boolean))].sort()
-);
+const availableRarities = computed(() => {
+  const presentValues = new Set(
+    cardsWithPrices.value.map((c) => c.rarity).filter(Boolean)
+  );
+  return rarityRef.value
+    .filter((r) => presentValues.has(r.value))
+    .map((r) => ({ value: r.value, title: r.label }));
+});
+
+/** Lookup tables built from the reference list. */
+const rarityLabelByValue = computed(() => {
+  const m = {};
+  for (const r of rarityRef.value) m[r.value] = r.label;
+  return m;
+});
+const rarityOrderByValue = computed(() => {
+  const m = {};
+  for (const r of rarityRef.value) m[r.value] = r.display_order;
+  return m;
+});
 
 /**
  * Apply the active filters to the merged-with-prices list. AND across filter
@@ -294,11 +321,12 @@ const filteredCards = computed(() => {
 const chartData = computed(() => {
   if (!filteredCards.value.length) return null;
 
-  // Group market prices by rarity, sourced from the filtered list so the
-  // chart visually agrees with the table.
+  // Group market prices by canonical rarity value, sourced from the filtered
+  // list so the chart visually agrees with the table. Cards with no rarity
+  // get a synthetic "unknown" bucket sorted to the far right.
   const groups = {};
   for (const card of filteredCards.value) {
-    const rarity = card.rarity ?? "Unknown";
+    const rarity = card.rarity ?? "__unknown__";
     if (card.market_price == null) continue;
     if (!groups[rarity]) groups[rarity] = [];
     groups[rarity].push(card.market_price);
@@ -306,22 +334,29 @@ const chartData = computed(() => {
 
   if (Object.keys(groups).length === 0) return null;
 
-  // Sort rarities: standard order first, then alphabetical
-  const labels = Object.keys(groups).sort((a, b) => {
-    const ai = RARITY_ORDER.indexOf(a);
-    const bi = RARITY_ORDER.indexOf(b);
-    if (ai !== -1 && bi !== -1) return ai - bi;
-    if (ai !== -1) return -1;
-    if (bi !== -1) return 1;
+  // Sort by canonical display_order ascending so the rarest column is on the
+  // left. Anything not in rarityRef (e.g. the unknown bucket) sorts after
+  // everything in the reference list.
+  const orderMap = rarityOrderByValue.value;
+  const FALLBACK = Number.POSITIVE_INFINITY;
+  const sortedValues = Object.keys(groups).sort((a, b) => {
+    const ai = orderMap[a] ?? FALLBACK;
+    const bi = orderMap[b] ?? FALLBACK;
+    if (ai !== bi) return ai - bi;
     return a.localeCompare(b);
   });
+
+  // Render display labels along the X axis but keep the canonical value as
+  // the lookup key for the data array.
+  const labelMap = rarityLabelByValue.value;
+  const labels = sortedValues.map((v) => labelMap[v] ?? v);
 
   return {
     labels,
     datasets: [
       {
         label: "Market Price",
-        data: labels.map((r) => groups[r]),
+        data: sortedValues.map((r) => groups[r]),
         backgroundColor: "rgba(232, 65, 42, 0.3)",
         borderColor: "#E8412A",
         borderWidth: 1,
@@ -436,8 +471,19 @@ function initFiltersForCurrentSet() {
   }
 }
 
+async function loadRarityReference() {
+  try {
+    rarityRef.value = await getReferenceRarities();
+  } catch {
+    // Reference fetch failure is non-fatal — the dropdown just shows
+    // canonical values without nice labels until the next refresh.
+    rarityRef.value = [];
+  }
+}
+
 onMounted(() => {
   initFiltersForCurrentSet();
+  loadRarityReference();
   loadSet();
   loadCards();
 });

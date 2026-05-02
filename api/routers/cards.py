@@ -16,9 +16,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
-from models.canonical import CanonicalCondition, CanonicalVariant
+from models.canonical import CanonicalCondition, CanonicalRarity, CanonicalVariant
 from models.card import Card, PriceSnapshot
-from schemas.card import CardDetailResponse, PriceHistoryResponse, PriceSnapshotResponse
+from schemas.card import CardDetailResponse, CardResponse, PriceHistoryResponse, PriceSnapshotResponse
 
 # Create a router for the /cards URL prefix.
 router = APIRouter(prefix="/cards", tags=["cards"])
@@ -36,6 +36,26 @@ def _label_maps(db: Session) -> tuple[dict[str, str], dict[str | None, str]]:
     cond = {row.value: row.display_label for row in db.query(CanonicalCondition).all()}
     var = {row.value: row.display_label for row in db.query(CanonicalVariant).all()}
     return cond, var
+
+
+def _rarity_labels(db: Session) -> dict[str, str]:
+    """Load the rarity canonical -> display label dict once per request."""
+    return {row.value: row.display_label for row in db.query(CanonicalRarity).all()}
+
+
+def _to_card_response(card: Card, rarity_labels: dict[str, str]) -> CardResponse:
+    """Build a CardResponse with rarity_label stamped in."""
+    return CardResponse(
+        id=card.id,
+        set_id=card.set_id,
+        name=card.name,
+        number=card.number,
+        rarity=card.rarity,
+        rarity_label=rarity_labels.get(card.rarity) if card.rarity else None,
+        supertype=card.supertype,
+        image_url=card.image_url,
+        created_at=card.created_at,
+    )
 
 
 def _to_snapshot_response(
@@ -108,9 +128,12 @@ def get_card(card_id: str, db: Session = Depends(get_db)):
 
     cond_labels, variant_labels = _label_maps(db)
 
+    rarity_labels = _rarity_labels(db)
+
     return CardDetailResponse.model_validate(
         {
             **card.__dict__,
+            "rarity_label": rarity_labels.get(card.rarity) if card.rarity else None,
             "latest_prices": [
                 _to_snapshot_response(s, cond_labels, variant_labels)
                 for s in latest_prices

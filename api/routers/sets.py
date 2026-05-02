@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.set import Set
 from models.card import Card, PriceSnapshot
-from routers.cards import _label_maps, _to_snapshot_response
+from routers.cards import _label_maps, _rarity_labels, _to_card_response, _to_snapshot_response
 from schemas.card import CardResponse, PriceSnapshotResponse, SetCardPricesResponse
 from schemas.set import SetResponse
 
@@ -141,7 +141,8 @@ def list_cards_for_set(set_id: str, db: Session = Depends(get_db)):
         .order_by(Card.number)
         .all()
     )
-    return cards
+    rarity_labels = _rarity_labels(db)
+    return [_to_card_response(c, rarity_labels) for c in cards]
 
 
 @router.get("/{set_id}/cards/prices", response_model=SetCardPricesResponse)

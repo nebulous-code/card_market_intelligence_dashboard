@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models.canonical import CanonicalCondition, CanonicalVariant
+from models.canonical import CanonicalCondition, CanonicalRarity, CanonicalVariant
 from schemas.reference import CanonicalValueResponse
 
 router = APIRouter(prefix="/reference", tags=["reference"])
@@ -48,6 +48,29 @@ def list_canonical_variants(db: Session = Depends(get_db)):
     rows = (
         db.query(CanonicalVariant)
         .order_by(CanonicalVariant.display_order, CanonicalVariant.value)
+        .all()
+    )
+    return [
+        CanonicalValueResponse(
+            value=row.value,
+            label=row.display_label,
+            display_order=row.display_order,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/rarities", response_model=list[CanonicalValueResponse])
+def list_canonical_rarities(db: Session = Depends(get_db)):
+    """
+    Return every canonical rarity (hyper_rare, ..., common).
+
+    Ordered rarest-first so a single ORDER BY display_order drives the
+    box-and-whisker chart's rarest-on-the-left column layout.
+    """
+    rows = (
+        db.query(CanonicalRarity)
+        .order_by(CanonicalRarity.display_order, CanonicalRarity.value)
         .all()
     )
     return [

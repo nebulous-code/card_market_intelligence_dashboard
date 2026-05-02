@@ -90,8 +90,24 @@ def main() -> None:
     cards = get_cards(brief_cards)
     log.info("Fetched %d cards successfully.", len(cards))
 
-    load_set(set_data, cards)
+    stats = load_set(set_data, cards)
     log.info("Ingestion complete for set: %s (%s)", tcgdex_id, set_data.get("name"))
+
+    # Surface any rarity strings that didn't resolve through rarity_aliases.
+    # Each one printed here means rows were inserted with rarity=NULL; add
+    # the alias and re-run to backfill.
+    unknowns = stats.get("unknowns") or {}
+    if unknowns:
+        log.warning("Unrecognized rarity values (cards stored with rarity=NULL):")
+        for (field, raw), count in sorted(
+            unknowns.items(), key=lambda kv: (kv[0][0], -kv[1])
+        ):
+            log.warning(
+                "  [%s] %r  (%d card%s)\n"
+                "     INSERT INTO rarity_aliases (raw_value, canonical_value)\n"
+                "     VALUES ($$%s$$, '<choose canonical>');",
+                field, raw, count, "s" if count != 1 else "", raw,
+            )
 
 
 if __name__ == "__main__":

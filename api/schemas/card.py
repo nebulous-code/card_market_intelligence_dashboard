@@ -79,6 +79,7 @@ class CardResponse(BaseModel):
     name: str
     number: str
     rarity: str | None
+    rarity_label: str | None
     supertype: str | None
     image_url: str | None
     created_at: datetime

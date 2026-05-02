@@ -140,6 +140,13 @@
         />
       </template>
 
+      <!-- Render the human-readable rarity label rather than the canonical
+           snake_case value stored on the row. The dropdown filter still
+           operates on the canonical key. -->
+      <template #item.rarity="{ item }">
+        {{ item.rarity_label ?? item.rarity ?? "" }}
+      </template>
+
       <!-- Custom rendering for the price column: format as a dollar amount. -->
       <template #item.market_price="{ item }">
         <span :class="item.market_price == null ? 'text-medium-emphasis' : ''">

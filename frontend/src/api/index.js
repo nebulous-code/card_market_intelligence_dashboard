@@ -133,6 +133,17 @@ export async function getReferenceVariants() {
 }
 
 /**
+ * Fetch the canonical rarity list (hyper_rare, ..., common) with display
+ * labels and sort order. Ordered rarest-first.
+ *
+ * @returns {Promise<Array<{value: string, label: string, display_order: number}>>}
+ */
+export async function getReferenceRarities() {
+  const { data } = await http.get("/reference/rarities");
+  return data;
+}
+
+/**
  * Lightweight liveness probe. Hits /health, which is intentionally DB-free
  * so a cold database does not block detection. Used by the cold-start loader
  * to know when the API service has woken up.

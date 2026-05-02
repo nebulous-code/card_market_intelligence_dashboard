@@ -44,7 +44,7 @@
             {{ card.supertype }}
           </v-chip>
           <v-chip v-if="card.rarity" variant="tonal">
-            {{ card.rarity }}
+            {{ card.rarity_label ?? card.rarity }}
           </v-chip>
         </v-col>
       </v-row>

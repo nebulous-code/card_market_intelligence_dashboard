@@ -86,7 +86,9 @@ const chartData = computed(() => {
   const counts = {};
 
   for (const card of props.cards) {
-    const rarity = card.rarity ?? "Unknown";
+    // Use the human-readable label from the API for grouping/display so the
+    // chart shows "Common" rather than the canonical "common".
+    const rarity = card.rarity_label ?? card.rarity ?? "Unknown";
     const prices = props.pricesByCardId[card.id] ?? [];
 
     // Use NM (Near Mint) — the condition label used by PokemonPriceTracker

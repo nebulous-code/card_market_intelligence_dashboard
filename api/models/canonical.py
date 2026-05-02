@@ -92,3 +92,38 @@ class VariantAlias(Base):
     canonical: Mapped["CanonicalVariant | None"] = relationship(
         "CanonicalVariant", back_populates="aliases"
     )
+
+
+class CanonicalRarity(Base):
+    """A canonical rarity value plus its display metadata.
+
+    display_order is rarest-first (lower number = rarer) so a single ORDER BY
+    on the column drives the box-and-whisker chart's rarest-on-the-left layout.
+    """
+
+    __tablename__ = "canonical_rarities"
+
+    value: Mapped[str] = mapped_column(Text, primary_key=True)
+    display_label: Mapped[str] = mapped_column(Text, nullable=False)
+    display_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+
+    aliases: Mapped[list["RarityAlias"]] = relationship(
+        "RarityAlias", back_populates="canonical"
+    )
+
+
+class RarityAlias(Base):
+    """Maps a raw TCGdex rarity string to a canonical rarity value."""
+
+    __tablename__ = "rarity_aliases"
+
+    raw_value: Mapped[str] = mapped_column(Text, primary_key=True)
+    canonical_value: Mapped[str] = mapped_column(
+        Text, ForeignKey("canonical_rarities.value", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
+
+    canonical: Mapped["CanonicalRarity"] = relationship(
+        "CanonicalRarity", back_populates="aliases"
+    )

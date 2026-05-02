@@ -167,9 +167,19 @@ Look at:
 
 ## Reacting to "Unrecognized values"
 
-Strict mode in the loader skips any row whose condition or variant isn't
-in the alias tables -- this prevents dirty data accumulating but means
-new PPT spellings come through as zero rows until you add the mapping.
+Three alias tables drive the canonical normalization:
+
+| Table | Used by | What it normalizes |
+|---|---|---|
+| `condition_aliases` | `run_prices.sh` (PPT loader) | Raw PPT condition strings (e.g. "Near Mint Unlimited Holofoil") |
+| `variant_aliases` | `run_prices.sh` (PPT loader) | Raw PPT variant strings (e.g. "1st Edition Holofoil") |
+| `rarity_aliases` | `run_ingest.sh` (TCGdex loader) | Raw TCGdex rarity strings (e.g. "Hyper rare") |
+
+Strict mode skips any price row whose condition or variant isn't in the
+alias tables -- this prevents dirty data accumulating but means new PPT
+spellings come through as zero rows until you add the mapping. Cards
+ingested with an unrecognized rarity are stored with `rarity=NULL` and
+the unknown is logged so the alias can be added and the set re-ingested.
 
 **Workflow when an unknown shows up:**
 
