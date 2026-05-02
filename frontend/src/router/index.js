@@ -4,6 +4,7 @@ import DebugLoaderView from "../views/DebugLoaderView.vue";
 import SetDetailView from "../views/SetDetailView.vue";
 import SetListView from "../views/SetListView.vue";
 import TrendsView from "../views/TrendsView.vue";
+import ConditionMultiplierHeatmap from "../views/trends/ConditionMultiplierHeatmap.vue";
 
 const routes = [
   {
@@ -47,6 +48,17 @@ const routes = [
       breadcrumbs: [
         { title: "Sets", to: "/sets" },
         { title: "Market Trends" },
+      ],
+    },
+  },
+  {
+    path: "/trends/condition-multipliers",
+    component: ConditionMultiplierHeatmap,
+    meta: {
+      breadcrumbs: [
+        { title: "Sets", to: "/sets" },
+        { title: "Market Trends", to: "/trends" },
+        { title: "Condition Multipliers" },
       ],
     },
   },

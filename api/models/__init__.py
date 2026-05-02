@@ -9,11 +9,14 @@ or apply migrations correctly.
 
 from models.canonical import (
     CanonicalCondition,
+    CanonicalRarity,
     CanonicalVariant,
     ConditionAlias,
+    RarityAlias,
     VariantAlias,
 )
 from models.card import Card, PriceSnapshot
+from models.condition_multiplier import ConditionMultiplier
 from models.set import Set
 from models.set_identifier import SetIdentifier
 from models.watermark import IngestionWatermark
@@ -25,7 +28,10 @@ __all__ = [
     "IngestionWatermark",
     "SetIdentifier",
     "CanonicalCondition",
+    "CanonicalRarity",
     "CanonicalVariant",
     "ConditionAlias",
+    "ConditionMultiplier",
+    "RarityAlias",
     "VariantAlias",
 ]

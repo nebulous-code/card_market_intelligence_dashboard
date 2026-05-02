@@ -45,6 +45,8 @@ jobs:
       RUN_DATE: unknown
       RUN_STATUS: "❌ Failed (script did not complete)"
       EMAIL_BODY: "The ingestion script crashed before generating a summary. Check the log artifact for details."
+      MULTIPLIER_STATUS: "Did not run"
+      MULTIPLIER_SUMMARY: "Condition multiplier refresh did not run -- price ingestion failed before this step."
 
     steps:
       - name: Check out repository
@@ -78,6 +80,18 @@ jobs:
           PPT_MAX_CARDS: ${{ vars.PPT_MAX_CARDS || '0' }}
         run: uv run python run.py
 
+      # Run the condition-multiplier refresh only when the price ingest
+      # succeeded -- if prices didn't update there's nothing new to
+      # recompute, and a successful multiplier run on stale data would be
+      # misleading. The summary block this step writes is appended to the
+      # email body via the MULTIPLIER_SUMMARY env var.
+      - name: Refresh condition multipliers
+        if: success()
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python run_refresh_multipliers.py
+
       - name: Upload ingestion log
         if: always()
         uses: actions/upload-artifact@v4
@@ -98,4 +112,8 @@ jobs:
           subject: "[Card Market] Nightly Ingestion — ${{ env.RUN_DATE }} — ${{ env.RUN_STATUS }}"
           to: ${{ secrets.NOTIFY_EMAIL }}
           from: Card Market Ingestion <${{ secrets.GMAIL_USERNAME }}>
-          body: ${{ env.EMAIL_BODY }}
+          body: |
+            ${{ env.EMAIL_BODY }}
+
+            Condition multiplier refresh: ${{ env.MULTIPLIER_STATUS }}
+            ${{ env.MULTIPLIER_SUMMARY }}

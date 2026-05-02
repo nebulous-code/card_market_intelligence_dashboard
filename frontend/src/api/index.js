@@ -153,6 +153,34 @@ export async function getReferenceRarities() {
 }
 
 /**
+ * Fetch the list of sets that have at least one row in condition_multipliers.
+ * Used by the Market Trends → Condition Multipliers heatmap to populate the
+ * set selector chips. Sets with no multiplier data are omitted.
+ *
+ * @returns {Promise<{sets: Array<{set_id: string, set_display_name: string}>}>}
+ */
+export async function getSetsWithMultipliers() {
+  const { data } = await http.get("/trends/sets-with-multipliers");
+  return data;
+}
+
+/**
+ * Fetch the condition multiplier matrix for one set, grouped by either rarity
+ * or supertype. Each grouping carries all 10 forward condition transitions
+ * that have data; transitions with no data are simply absent from the array.
+ *
+ * @param {string} setId - The canonical set ID (e.g. "base1").
+ * @param {"rarity" | "supertype"} groupingType - Which `cards.*` column to bucket by.
+ * @returns {Promise<Object>} ConditionMultiplierResponse.
+ */
+export async function getConditionMultipliers(setId, groupingType) {
+  const { data } = await http.get("/trends/condition-multipliers", {
+    params: { set_id: setId, grouping_type: groupingType },
+  });
+  return data;
+}
+
+/**
  * Lightweight liveness probe. Hits /health, which is intentionally DB-free
  * so a cold database does not block detection. Used by the cold-start loader
  * to know when the API service has woken up.
