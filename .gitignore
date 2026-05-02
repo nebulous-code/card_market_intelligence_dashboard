@@ -22,4 +22,8 @@ Thumbs.db
 # Logs
 *.log
 docs/milestone_1_code_review.md
+
+# Coverage artefacts
 .coverage
+htmlcov/
+frontend/coverage/
