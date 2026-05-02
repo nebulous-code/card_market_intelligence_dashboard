@@ -21,10 +21,23 @@
             <div class="text-h5 font-weight-bold">{{ set.name }}</div>
             <div class="text-subtitle-1 text-medium-emphasis">{{ set.series }}</div>
           </v-col>
-          <v-col cols="auto" class="text-right">
+          <v-col cols="auto" class="text-center kpi-tile">
             <div class="text-body-2 text-medium-emphasis">Cards</div>
             <div class="text-h6">{{ formatNumber(set.printed_total) }}</div>
           </v-col>
+          <!-- Secret Rares + Total only render when the set actually has
+               secrets numbered above printed_total. Classic sets with no
+               secrets show the simpler Cards / Released layout. -->
+          <template v-if="secretCount > 0">
+            <v-col cols="auto" class="text-center kpi-tile">
+              <div class="text-body-2 text-medium-emphasis">Secret Rares</div>
+              <div class="text-h6">{{ formatNumber(secretCount) }}</div>
+            </v-col>
+            <v-col cols="auto" class="text-center kpi-tile">
+              <div class="text-body-2 text-medium-emphasis">Total</div>
+              <div class="text-h6">{{ formatNumber(set.total_count) }}</div>
+            </v-col>
+          </template>
           <v-col cols="auto" class="text-right">
             <div class="text-body-2 text-medium-emphasis">Released</div>
             <div class="text-h6">{{ formatDate(set.release_date) }}</div>
@@ -39,7 +52,7 @@
         Price Distribution by Rarity
       </v-card-title>
       <v-card-text>
-        <v-skeleton-loader v-if="loadingCards" type="image" />
+        <v-skeleton-loader v-if="loadingCards || loadingPrices" type="image" />
         <EmptyState
           v-else-if="!chartData"
           icon="mdi-chart-box-outline"
@@ -165,6 +178,18 @@ const cards = ref([]);
 const pricesByCardId = ref({});
 const loadingSet = ref(true);
 const loadingCards = ref(true);
+// Separate from loadingCards because the chart needs prices but the card
+// table does not. Without this, the chart flashes the "No price data" empty
+// state during the brief window after cards return but before prices do.
+const loadingPrices = ref(true);
+
+// Number of secret rares = total cards in DB minus the printed count.
+// Falls back to 0 when set hasn't loaded yet or counts disagree (defensive).
+const secretCount = computed(() => {
+  if (!set.value) return 0;
+  const diff = (set.value.total_count ?? 0) - (set.value.printed_total ?? 0);
+  return diff > 0 ? diff : 0;
+});
 
 // Canonical rarity reference list (rarest-first by display_order). Drives the
 // rarity dropdown options and the box-and-whisker column ordering. Fetched
@@ -394,10 +419,16 @@ const chartOptions = {
   scales: {
     y: {
       type: "logarithmic",
-      min: 0.1,
+      // 1¢ floor — cards do trade for $0.04 / $0.07. The previous $0.10
+      // floor silently clipped the lowest-priced commons off the plot.
+      min: 0.01,
       title: { display: true, text: "Market Price (USD)" },
       ticks: {
-        callback: (val) => formatCompactCurrency(val),
+        // Sub-dollar values need two decimals so $0.10 renders as "$0.10"
+        // not "$0.1". At $1 and up, compact notation keeps the axis tight
+        // ("$1K" vs "$1,000.00").
+        callback: (val) =>
+          val < 1 ? formatCurrency(val) : formatCompactCurrency(val),
         padding: 10,
       },
       grid: {
@@ -408,7 +439,8 @@ const chartOptions = {
       // Chart.js log scale auto-ticks are unpredictable, so we replace them entirely.
       afterBuildTicks(scale) {
         const TICK_SEQUENCE = [
-          0.1, 0.5, 1, 5, 10, 50, 100, 500, 1_000, 5_000, 10_000, 50_000, 100_000,
+          0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500,
+          1_000, 5_000, 10_000, 50_000, 100_000,
         ];
         scale.ticks = TICK_SEQUENCE
           .filter((v) => v <= (scale.max ?? Infinity) * 1.5)
@@ -430,6 +462,7 @@ async function loadSet() {
 
 async function loadCards() {
   loadingCards.value = true;
+  loadingPrices.value = true;
   cards.value = [];
   pricesByCardId.value = {};
   try {
@@ -437,11 +470,15 @@ async function loadCards() {
   } finally {
     loadingCards.value = false;
   }
-  // Load prices independently so card table shows even if prices fail
+  // Load prices independently so card table shows even if prices fail.
+  // loadingPrices stays true until this finishes so the chart skeleton holds
+  // through the gap rather than flashing the "no price data" empty state.
   try {
     pricesByCardId.value = await getSetCardPrices(setId.value);
   } catch {
     pricesByCardId.value = {};
+  } finally {
+    loadingPrices.value = false;
   }
 }
 
@@ -521,3 +558,12 @@ watch(
   { deep: true }
 );
 </script>
+
+<style scoped>
+/* Give each numeric KPI tile a comfortable minimum width so labels and
+   numbers stay centered with breathing room rather than hugging each
+   other when the column is set to cols="auto". */
+.kpi-tile {
+  min-width: 96px;
+}
+</style>

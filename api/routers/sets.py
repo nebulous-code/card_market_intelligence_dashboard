@@ -59,6 +59,16 @@ def list_sets(db: Session = Depends(get_db)):
     )
     stats_by_set = {row.set_id: row for row in price_stats}
 
+    # Total card count per set (including secret rares numbered above
+    # printed_total). The frontend uses this to render the "Secret Rares"
+    # KPI in the set header and the "+N secret" badge on set list cards.
+    card_counts = (
+        db.query(Card.set_id, func.count(Card.id).label("total_count"))
+        .group_by(Card.set_id)
+        .all()
+    )
+    count_by_set = {row.set_id: row.total_count for row in card_counts}
+
     sets = db.query(Set).order_by(Set.release_date.desc().nulls_last()).all()
     result = []
     for s in sets:
@@ -69,6 +79,7 @@ def list_sets(db: Session = Depends(get_db)):
                 name=s.name,
                 series=s.series,
                 printed_total=s.printed_total,
+                total_count=count_by_set.get(s.id, 0),
                 release_date=s.release_date,
                 symbol_url=s.symbol_url,
                 logo_url=s.logo_url,
@@ -104,7 +115,21 @@ def get_set(set_id: str, db: Session = Depends(get_db)):
     if record is None:
         raise HTTPException(status_code=404, detail=f"Set '{set_id}' not found")
 
-    return record
+    total_count = (
+        db.query(func.count(Card.id)).filter(Card.set_id == set_id).scalar() or 0
+    )
+
+    return SetResponse(
+        id=record.id,
+        name=record.name,
+        series=record.series,
+        printed_total=record.printed_total,
+        total_count=total_count,
+        release_date=record.release_date,
+        symbol_url=record.symbol_url,
+        logo_url=record.logo_url,
+        created_at=record.created_at,
+    )
 
 
 @router.get("/{set_id}/cards", response_model=list[CardResponse])
