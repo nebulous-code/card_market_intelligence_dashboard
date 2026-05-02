@@ -21,6 +21,8 @@ import {
   getReferenceConditions,
   getReferenceVariants,
   getReferenceRarities,
+  getSetsWithMultipliers,
+  getConditionMultipliers,
   getHealth,
 } from "../../src/api/index.js";
 
@@ -109,6 +111,23 @@ describe("reference list helpers", () => {
     httpGet.mockResolvedValue({ data: [{ value: "common" }] });
     await getReferenceRarities();
     expect(httpGet).toHaveBeenCalledWith("/reference/rarities");
+  });
+});
+
+describe("trends helpers", () => {
+  it("getSetsWithMultipliers GETs /trends/sets-with-multipliers", async () => {
+    httpGet.mockResolvedValue({ data: { sets: [] } });
+    await getSetsWithMultipliers();
+    expect(httpGet).toHaveBeenCalledWith("/trends/sets-with-multipliers");
+  });
+
+  it("getConditionMultipliers forwards set_id and grouping_type", async () => {
+    httpGet.mockResolvedValue({ data: { groupings: [] } });
+    await getConditionMultipliers("base1", "rarity");
+    expect(httpGet).toHaveBeenCalledWith(
+      "/trends/condition-multipliers",
+      { params: { set_id: "base1", grouping_type: "rarity" } },
+    );
   });
 });
 

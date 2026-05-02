@@ -135,6 +135,65 @@ def sample_cards(db_session, sample_set):
 
 
 @pytest.fixture
+def sample_multipliers(db_session, sample_set):
+    """Seed condition_multipliers rows for the sample set.
+
+    Covers two rarities ('rare', 'common') and two supertypes ('Pokemon',
+    'Trainer') with a representative subset of forward transitions. The
+    deliberate quirk: 'common' rarity has only 3 transitions seeded
+    (NM->LP, NM->MP, LP->MP) so tests can assert that absent transitions
+    don't appear in the response rather than appearing as null.
+    """
+    from datetime import datetime
+    from decimal import Decimal
+
+    from models.condition_multiplier import ConditionMultiplier
+
+    rows = [
+        # Rare rarity -- full forward set (NM->LP/MP/HP/DMG plus LP->MP).
+        dict(grouping_type="rarity", grouping_value="rare",
+             from_condition="NM", to_condition="LP", multiplier="0.6000", data_points=50),
+        dict(grouping_type="rarity", grouping_value="rare",
+             from_condition="NM", to_condition="MP", multiplier="0.4000", data_points=45),
+        dict(grouping_type="rarity", grouping_value="rare",
+             from_condition="NM", to_condition="HP", multiplier="0.3000", data_points=30),
+        dict(grouping_type="rarity", grouping_value="rare",
+             from_condition="NM", to_condition="DMG", multiplier="0.2000", data_points=20),
+        dict(grouping_type="rarity", grouping_value="rare",
+             from_condition="LP", to_condition="MP", multiplier="0.7000", data_points=40),
+        # Common rarity -- partial set so missing-transition assertions are possible.
+        dict(grouping_type="rarity", grouping_value="common",
+             from_condition="NM", to_condition="LP", multiplier="0.7500", data_points=100),
+        dict(grouping_type="rarity", grouping_value="common",
+             from_condition="NM", to_condition="MP", multiplier="0.5500", data_points=90),
+        dict(grouping_type="rarity", grouping_value="common",
+             from_condition="LP", to_condition="MP", multiplier="0.7400", data_points=80),
+        # Supertype rows.
+        dict(grouping_type="supertype", grouping_value="Pokemon",
+             from_condition="NM", to_condition="LP", multiplier="0.6500", data_points=120),
+        dict(grouping_type="supertype", grouping_value="Trainer",
+             from_condition="NM", to_condition="LP", multiplier="0.7000", data_points=60),
+    ]
+
+    inserted = []
+    for r in rows:
+        cm = ConditionMultiplier(
+            set_id=sample_set.id,
+            grouping_type=r["grouping_type"],
+            grouping_value=r["grouping_value"],
+            from_condition=r["from_condition"],
+            to_condition=r["to_condition"],
+            multiplier=Decimal(r["multiplier"]),
+            data_points=r["data_points"],
+            last_refreshed=datetime(2026, 5, 1, 12, 0),
+        )
+        db_session.add(cm)
+        inserted.append(cm)
+    db_session.flush()
+    return inserted
+
+
+@pytest.fixture
 def sample_snapshots(db_session, sample_cards):
     """Insert price snapshots covering current + historical for one card."""
     from datetime import date, datetime
