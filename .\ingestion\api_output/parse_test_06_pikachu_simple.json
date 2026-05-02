@@ -1,0 +1,87 @@
+{
+  "data": {
+    "originalTitle": "Pikachu Base Set 58/102",
+    "sanitizedTitle": "Pikachu Base Set 58/102",
+    "parsed": {
+      "confidence": 0.775,
+      "setName": "Base Set",
+      "cardName": "Pikachu",
+      "fieldConfidence": {
+        "setName": 0.8,
+        "cardName": 0.75
+      }
+    },
+    "matches": [
+      {
+        "tcgPlayerId": "186015",
+        "name": "Detective Pikachu",
+        "setName": "Detective Pikachu",
+        "setId": 2409,
+        "cardNumber": "10/18",
+        "rarity": "Rare",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 5.281939506530762,
+        "matchReasons": [
+          "Name matches \"Pikachu\""
+        ],
+        "language": "english",
+        "prices": {
+          "market": 8.31,
+          "low": 2.03,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "159115",
+        "name": "______'s Pikachu",
+        "setName": "Pikachu World Collection Promos",
+        "setId": 2205,
+        "cardNumber": "24",
+        "rarity": "Promo",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 4.576578617095947,
+        "matchReasons": [
+          "Name matches \"Pikachu\""
+        ],
+        "language": "english",
+        "prices": {
+          "market": 189,
+          "low": 0,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "215159",
+        "name": "Pikachu (French)",
+        "setName": "Pikachu World Collection Promos",
+        "setId": 2205,
+        "cardNumber": "PW 7",
+        "rarity": "Promo",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 4.576578617095947,
+        "matchReasons": [
+          "Name matches \"Pikachu\""
+        ],
+        "language": "english",
+        "prices": {
+          "market": 110.98,
+          "low": 120,
+          "mid": null,
+          "high": null
+        }
+      }
+    ]
+  },
+  "metadata": {
+    "parseTime": "2026-05-02T15:52:52.394Z",
+    "processingTimeMs": 48,
+    "confidence": 0.775,
+    "apiCallsConsumed": 3,
+    "parsingMethod": "regex-pattern-v1"
+  }
+}
