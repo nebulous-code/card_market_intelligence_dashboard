@@ -1,0 +1,45 @@
+# Render Blueprint -- declarative service config for this repo.
+#
+# This file is documentation + a reproducibility backstop. Render does NOT
+# auto-apply it unless you explicitly opt in via Render's Blueprint feature
+# (https://render.com/docs/blueprint-spec). Today the services are
+# managed through the Render dashboard, and this file just captures the
+# settings that aren't obvious from the code -- specifically the SPA
+# rewrite rule the static site needs.
+#
+# To bring an environment up from this file in the future:
+#   1. Connect the repo as a new Blueprint in Render.
+#   2. Render reads this file, creates the services, and prompts for any
+#      env vars (DATABASE_URL, POKEMON_PRICE_TRACKER_API_KEY, etc.).
+#
+# If you change settings in the dashboard, mirror them here so the file
+# stays accurate -- otherwise a future Blueprint apply would overwrite
+# the dashboard config with stale values.
+
+services:
+  # ---------- Frontend static site ----------
+  # Vite build output served as static files. The `routes` block is the
+  # piece that matters today: it tells Render to serve index.html for any
+  # unmatched path so client-side routing (e.g. /sets, /cards/base1-4)
+  # works on direct navigation and refresh.
+  - type: web
+    name: dev-card-market-dashboard
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # ---------- Backend API ----------
+  # FastAPI + alembic. Runtime applies pending migrations at startup
+  # (see api/main.py lifespan). Env vars are managed in the dashboard
+  # and intentionally NOT listed here so secrets don't leak via Git.
+  - type: web
+    name: dev-card-market-api
+    runtime: python
+    rootDir: api
+    buildCommand: uv sync
+    startCommand: uv run uvicorn main:app --host 0.0.0.0 --port $PORT

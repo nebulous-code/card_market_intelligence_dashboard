@@ -367,7 +367,7 @@ def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> dict
                     raw = str(card.get("cardNumber", "")).strip().split("/")[0]
                     card_number = raw.lstrip("0") or "0"
 
-                    if not card_number:
+                    if not card_number:  # pragma: no cover -- unreachable: lstrip("0") or "0" never returns falsy
                         log.warning("[%s] SKIPPED (no number): '%s' has no cardNumber", set_id, card_name)
                         stats["skipped"] += 1
                         stats["skipped_cards"].append((raw or "?", card_name, "no cardNumber"))
