@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import CardDetail from "../views/CardDetail.vue";
+import DebugLoaderView from "../views/DebugLoaderView.vue";
 import SetDetailView from "../views/SetDetailView.vue";
 import SetListView from "../views/SetListView.vue";
 import TrendsView from "../views/TrendsView.vue";
@@ -47,6 +48,16 @@ const routes = [
         { title: "Sets", to: "/sets" },
         { title: "Market Trends" },
       ],
+    },
+  },
+  {
+    // Debug harness for the cold-start loader. Not linked from the nav --
+    // discoverable via URL only. Mounts ColdStartLoader in debug mode so
+    // polling and the error timeout are suppressed.
+    path: "/debug/loader",
+    component: DebugLoaderView,
+    meta: {
+      breadcrumbs: [{ title: "Debug" }, { title: "Loader" }],
     },
   },
 ];

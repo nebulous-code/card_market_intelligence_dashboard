@@ -19,8 +19,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import the URL route groups: sets, cards, and reference data.
-from routers import cards, reference, sets
+# Import the URL route groups: sets, cards, reference data, and liveness.
+from routers import cards, health, reference, sets
 
 
 @asynccontextmanager
@@ -100,6 +100,7 @@ app.add_middleware(
 app.include_router(sets.router)       # handles /sets and /sets/{id}/cards
 app.include_router(cards.router)      # handles /cards/{id}
 app.include_router(reference.router)  # handles /reference/conditions, /reference/variants
+app.include_router(health.router)     # handles /health (used by the cold-start loader)
 
 
 @app.get("/", include_in_schema=False)

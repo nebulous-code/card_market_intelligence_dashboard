@@ -131,3 +131,15 @@ export async function getReferenceVariants() {
   const { data } = await http.get("/reference/variants");
   return data;
 }
+
+/**
+ * Lightweight liveness probe. Hits /health, which is intentionally DB-free
+ * so a cold database does not block detection. Used by the cold-start loader
+ * to know when the API service has woken up.
+ *
+ * @returns {Promise<{status: string}>}
+ */
+export async function getHealth() {
+  const { data } = await http.get("/health");
+  return data;
+}
