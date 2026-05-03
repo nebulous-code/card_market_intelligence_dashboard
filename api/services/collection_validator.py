@@ -112,8 +112,10 @@ def validate_workbook(file_bytes: bytes, db: Session) -> ValidationResult:
             parsed, errors = _validate_one(row_dict, row_idx, set_lookup, db)
             if errors:
                 result.row_errors.extend(errors)
-            elif parsed is not None:
-                result.parsed_rows.append(parsed)
+            else:
+                # _validate_one always returns a non-None parsed row when
+                # the errors list is empty, so the else branch is total.
+                result.parsed_rows.append(parsed)  # type: ignore[arg-type]
         return result
     finally:
         wb.close()
@@ -155,8 +157,8 @@ def _build_set_lookup(db: Session) -> dict[str, str]:
         )
     ).fetchall()
     for row in rows:
-        if row.label is None:
-            continue
+        # `label` is the union of three NOT NULL columns -- a NULL value
+        # would have to come from a manual UPDATE breaking constraints.
         lookup[str(row.label).strip().lower()] = row.set_id
     return lookup
 

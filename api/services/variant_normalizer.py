@@ -73,8 +73,9 @@ def _format_word(word: str) -> str:
     Mixed-case tokens (``Holo``, ``misprint``) get a single Title Case
     pass: first character upper, rest lower.
     """
-    if not word:
-        return word
+    # Empty tokens never reach this function: _normalize_fragment trims
+    # and collapses whitespace before splitting, so the split never yields
+    # an empty string.
     letters = [c for c in word if c.isalpha()]
     if letters and all(c.isupper() for c in letters):
         return word

@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock axios at the module boundary so we never make real HTTP calls.
-// The factory needs the spy at hoisted scope because vi.mock() executes
-// before any top-level `const`. vi.hoisted() lets us share `httpGet` with
+// The factory needs the spies at hoisted scope because vi.mock() executes
+// before any top-level `const`. vi.hoisted() lets us share the spies with
 // both the factory and the per-test assertions.
-const { httpGet } = vi.hoisted(() => ({ httpGet: vi.fn() }));
+const { httpGet, httpPost, httpDelete } = vi.hoisted(() => ({
+  httpGet: vi.fn(),
+  httpPost: vi.fn(),
+  httpDelete: vi.fn(),
+}));
 vi.mock("axios", () => ({
   default: {
-    create: vi.fn(() => ({ get: httpGet })),
+    create: vi.fn(() => ({ get: httpGet, post: httpPost, delete: httpDelete })),
   },
 }));
 
@@ -24,10 +28,18 @@ import {
   getSetsWithMultipliers,
   getConditionMultipliers,
   getHealth,
+  downloadCollectionTemplate,
+  uploadCollection,
+  downloadAnnotatedWorkbook,
+  useMockCollection,
+  getCollectionSession,
+  deleteCollectionSession,
 } from "../../src/api/index.js";
 
 beforeEach(() => {
   httpGet.mockReset();
+  httpPost.mockReset();
+  httpDelete.mockReset();
 });
 
 describe("getSets", () => {
@@ -137,6 +149,84 @@ describe("getHealth", () => {
     const result = await getHealth();
     expect(httpGet).toHaveBeenCalledWith("/health");
     expect(result).toEqual({ status: "ok" });
+  });
+});
+
+describe("downloadCollectionTemplate", () => {
+  it("GETs /collection/template as a blob and unwraps data", async () => {
+    const blob = new Blob(["xlsx-bytes"]);
+    httpGet.mockResolvedValue({ data: blob });
+    const result = await downloadCollectionTemplate();
+    expect(httpGet).toHaveBeenCalledWith(
+      "/collection/template",
+      { responseType: "blob" },
+    );
+    expect(result).toBe(blob);
+  });
+});
+
+describe("uploadCollection", () => {
+  it("POSTs the file as multipart and returns the JSON body", async () => {
+    httpPost.mockResolvedValue({
+      data: { session_id: "abc", card_count: 3, set_count: 1 },
+    });
+    const file = new File(["xlsx"], "collection.xlsx");
+    const result = await uploadCollection(file);
+
+    expect(httpPost).toHaveBeenCalledTimes(1);
+    const [path, form] = httpPost.mock.calls[0];
+    expect(path).toBe("/collection/upload");
+    expect(form).toBeInstanceOf(FormData);
+    expect(form.get("file")).toBe(file);
+    expect(result).toEqual({ session_id: "abc", card_count: 3, set_count: 1 });
+  });
+});
+
+describe("downloadAnnotatedWorkbook", () => {
+  it("POSTs the file and returns the blob", async () => {
+    const blob = new Blob(["annotated"]);
+    httpPost.mockResolvedValue({ data: blob });
+    const file = new File(["xlsx"], "errors.xlsx");
+    const result = await downloadAnnotatedWorkbook(file);
+
+    expect(httpPost).toHaveBeenCalledTimes(1);
+    const [path, form, opts] = httpPost.mock.calls[0];
+    expect(path).toBe("/collection/upload/annotated");
+    expect(form).toBeInstanceOf(FormData);
+    expect(form.get("file")).toBe(file);
+    expect(opts).toEqual({ responseType: "blob" });
+    expect(result).toBe(blob);
+  });
+});
+
+describe("useMockCollection", () => {
+  it("POSTs /collection/mock with no body", async () => {
+    httpPost.mockResolvedValue({
+      data: { session_id: "abc", card_count: 20, set_count: 4 },
+    });
+    const result = await useMockCollection();
+    expect(httpPost).toHaveBeenCalledWith("/collection/mock");
+    expect(result).toEqual({ session_id: "abc", card_count: 20, set_count: 4 });
+  });
+});
+
+describe("getCollectionSession", () => {
+  it("GETs /collection/session", async () => {
+    httpGet.mockResolvedValue({
+      data: { session_id: "abc", rows: [], card_count: 0, set_count: 0 },
+    });
+    const result = await getCollectionSession();
+    expect(httpGet).toHaveBeenCalledWith("/collection/session");
+    expect(result.session_id).toBe("abc");
+  });
+});
+
+describe("deleteCollectionSession", () => {
+  it("DELETEs /collection/session and resolves to undefined", async () => {
+    httpDelete.mockResolvedValue({ status: 204 });
+    const result = await deleteCollectionSession();
+    expect(httpDelete).toHaveBeenCalledWith("/collection/session");
+    expect(result).toBeUndefined();
   });
 });
 
