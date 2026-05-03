@@ -60,5 +60,6 @@ const dynamicCrumbs = inject('dynamicCrumbs', { value: {} })
 const navItems = [
   { label: 'Sets', icon: 'mdi-cards', route: '/sets', disabled: false },
   { label: 'Market Trends', icon: 'mdi-chart-line', route: '/trends', disabled: false },
+  { label: 'Analyze Your Collection', icon: 'mdi-book-search', route: '/collection', disabled: false },
 ]
 </script>

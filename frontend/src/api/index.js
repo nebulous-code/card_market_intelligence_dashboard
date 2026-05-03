@@ -30,6 +30,10 @@ const baseURL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const http = axios.create({
   baseURL,
   timeout: 15000,
+  // Required so the browser sends and stores the HttpOnly session cookie
+  // returned by /collection/upload. Without this every request to a
+  // cross-origin API would silently strip the cookie.
+  withCredentials: true,
 });
 
 /**
@@ -190,4 +194,81 @@ export async function getConditionMultipliers(setId, groupingType) {
 export async function getHealth() {
   const { data } = await http.get("/health");
   return data;
+}
+
+/**
+ * Download the upload template as a Blob suitable for triggering a save
+ * dialog via a temporary anchor click. The filename is set by the server
+ * via Content-Disposition; callers can fall back to a generic name.
+ *
+ * @returns {Promise<Blob>}
+ */
+export async function downloadCollectionTemplate() {
+  const response = await http.get("/collection/template", { responseType: "blob" });
+  return response.data;
+}
+
+/**
+ * Upload a filled-out collection workbook. On success the API sets a
+ * session cookie and returns a summary; the caller redirects to the
+ * collection dashboard. On row-level validation failure axios throws
+ * with a 422 -- callers should inspect ``error.response.data.detail``
+ * for the structured ``UploadValidationFailure`` payload.
+ *
+ * @param {File} file
+ * @returns {Promise<{session_id: string, card_count: number, set_count: number}>}
+ */
+export async function uploadCollection(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await http.post("/collection/upload", form);
+  return data;
+}
+
+/**
+ * Re-submit a workbook that previously failed validation and get back
+ * the annotated copy with an Error column added.
+ *
+ * @param {File} file
+ * @returns {Promise<Blob>}
+ */
+export async function downloadAnnotatedWorkbook(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await http.post("/collection/upload/annotated", form, {
+    responseType: "blob",
+  });
+  return response.data;
+}
+
+/**
+ * Run the bundled mock collection through the upload pipeline. Same
+ * response shape as ``uploadCollection``.
+ *
+ * @returns {Promise<{session_id: string, card_count: number, set_count: number}>}
+ */
+export async function useMockCollection() {
+  const { data } = await http.post("/collection/mock");
+  return data;
+}
+
+/**
+ * Fetch the parsed collection tied to the caller's session cookie.
+ * Throws on 404 if the session is missing or expired.
+ *
+ * @returns {Promise<{session_id: string, rows: Array, card_count: number, set_count: number}>}
+ */
+export async function getCollectionSession() {
+  const { data } = await http.get("/collection/session");
+  return data;
+}
+
+/**
+ * Clear the session cookie and the row backing it. Resolves to
+ * ``undefined`` since the API returns 204.
+ *
+ * @returns {Promise<void>}
+ */
+export async function deleteCollectionSession() {
+  await http.delete("/collection/session");
 }

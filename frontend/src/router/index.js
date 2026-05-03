@@ -1,6 +1,9 @@
 import { createRouter, createWebHistory } from "vue-router";
 import CardDetail from "../views/CardDetail.vue";
+import CollectionDashboardView from "../views/CollectionDashboardView.vue";
+import CollectionView from "../views/CollectionView.vue";
 import DebugLoaderView from "../views/DebugLoaderView.vue";
+import PrivacyView from "../views/PrivacyView.vue";
 import SetDetailView from "../views/SetDetailView.vue";
 import SetListView from "../views/SetListView.vue";
 import TrendsView from "../views/TrendsView.vue";
@@ -59,6 +62,34 @@ const routes = [
         { title: "Sets", to: "/sets" },
         { title: "Market Trends", to: "/trends" },
         { title: "Condition Multipliers" },
+      ],
+    },
+  },
+  {
+    path: "/collection",
+    component: CollectionView,
+    meta: {
+      breadcrumbs: [
+        { title: "Analyze Your Collection" },
+      ],
+    },
+  },
+  {
+    path: "/collection/dashboard",
+    component: CollectionDashboardView,
+    meta: {
+      breadcrumbs: [
+        { title: "Analyze Your Collection", to: "/collection" },
+        { title: "Dashboard" },
+      ],
+    },
+  },
+  {
+    path: "/privacy",
+    component: PrivacyView,
+    meta: {
+      breadcrumbs: [
+        { title: "Privacy Policy" },
       ],
     },
   },

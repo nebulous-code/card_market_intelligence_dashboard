@@ -26,7 +26,7 @@ This story is responsible for getting the user's collection into a state where t
 
 **File:** `frontend/src/views/CollectionView.vue`
 **Breadcrumb:** `Analyze Your Collection`
-**Sidebar nav item:** Add **Analyze Your Collection** to the sidebar in `AppLayout.vue` between Market Trends and any future entries. Use the `mdi-folder-account` icon.
+**Sidebar nav item:** Add **Analyze Your Collection** to the sidebar in `AppLayout.vue` between Market Trends and any future entries. Use the `mdi-book-search` icon.
 
 ### Layout
 
@@ -124,10 +124,9 @@ The backend reads the workbook with `openpyxl` and validates row by row:
 | Set value not in `set_identifiers` | "Set '{value}' is not recognized" |
 | Card Number doesn't match a card in the resolved set | "Card number {value} does not exist in {set}" |
 | Condition not in {NM, LP, MP, HP, DMG} | "Condition must be NM, LP, MP, HP, or DMG" |
-| Is 1st Edition not in {TRUE, FALSE} | "Is 1st Edition must be TRUE or FALSE" |
+| Is 1st Edition not in {TRUE, FALSE, blank} | "Is 1st Edition must be TRUE or FALSE" |
 | Quantity not a positive integer | "Quantity must be a whole number greater than 0" |
 | Purchase Price present but not numeric | "Purchase Price must be a number or left blank" |
-| Variant present but parser returns low confidence | "Variant '{value}' could not be confidently identified — remove this row or update the variant value" |
 
 Columns the app doesn't expect (e.g. `Error`, custom user notes) are silently ignored.
 
@@ -137,23 +136,34 @@ The upload is rejected if **any** required column is missing from the header. If
 
 This means: structural problems = hard fail with a clear error, row problems = soft fail with downloadable feedback.
 
-### Variant Parsing via PPT
+### Variant Handling — No External Parsing
 
-If a row has a Variant value, the backend constructs a search string and calls the PokemonPriceTracker `parse-title` endpoint:
+**The Variant column is free-form text and does NOT use any external API for parsing or normalization.** Apply simple in-process normalization to the user's input:
 
-```
-"{card_name} {set_display_name} {variant} {condition}{ 1st Edition if applicable}"
-```
+1. **Split** the input on `,`, `|`, `/`, and `&` separators. Each result becomes a separate variant value.
+2. **Trim** leading/trailing whitespace from each split value.
+3. **Collapse** multiple internal spaces to a single space.
+4. **Title Case with acronym preservation:**
+   - Split each variant on whitespace
+   - For each word, if the input is entirely uppercase (e.g. `PSA`), preserve it as-is
+   - Otherwise, apply Title Case (first letter capitalized, rest lowercase)
+   - Rejoin with spaces
 
-Example: `"Charizard Base Set Reverse Holo NM 1st Edition"`
+Examples:
+- `reverse holo` → `Reverse Holo`
+- `REVERSE HOLO` → `Reverse Holo` (entirely-uppercase short single words still title-case unless they look like acronyms — see note below)
+- `Reverse Holo, Misprint` → `[Reverse Holo, Misprint]` (two separate variants)
+- `1st edition holo` → `1st Edition Holo`
+- `PSA graded` → `PSA Graded`
+- `(blank)` → no variant — store as null/blank
 
-The parser response is checked for confidence:
-- `confidence >= 0.85` — accept the variant as-is
-- `confidence < 0.85` — flag the row as an error with the suggestion to remove it
+**On the acronym rule edge case:** "ENTIRELY UPPERCASE" means the user typed a word in all caps as an apparent acronym. A word like `PSA` (3 letters, all caps in original input) is preserved. A word like `REVERSE` would also be preserved by this rule strictly speaking — that's fine, we accept the user's intent.
 
-**Caveat for credit budget:** parse-title calls cost API credits. If the user uploads 200 rows with 50 variant entries, that's 50 credits per upload. Worth noting in the docs but not a blocker for Milestone 4.
+A row with both `Variant = "Reverse Holo"` AND `Is 1st Edition = TRUE` stores both separately:
+- `variant` field: `"Reverse Holo"` (normalized)
+- `is_first_edition` field: `true`
 
-If the Variant column is blank, no parser call is made and the row is treated as a standard card.
+These are stored as two separate columns on the parsed collection row. The is_first_edition boolean is NOT folded into the variant string. The dashboard's variant chart and slicer (M04_S04) treat them as two separate filter dimensions where the same card can contribute to both — see those stories for the full treatment.
 
 ### Annotated Workbook
 
@@ -169,6 +179,23 @@ POST /collection/upload/annotated
 ```
 
 This endpoint accepts the original file plus the validation results from the previous upload attempt and returns the annotated `.xlsx`.
+
+---
+
+## Collection Row → Card Matching
+
+For each row in the uploaded workbook, the backend resolves the row to a canonical `card_id` and stores the structured data in the session.
+
+**Matching steps:**
+
+1. `set_name` → `set_id` via the existing `set_identifiers` table (M03_S01)
+2. `(set_id, card_number)` → `cards.id` via existing card lookup logic
+3. `condition` is stored as-is from the user input (validation guarantees it's one of NM/LP/MP/HP/DMG)
+4. `variant` is normalized in-process (per the Variant Handling section above) and stored as the normalized text
+5. `is_first_edition` is stored as a separate boolean column on the parsed row
+6. `quantity` and `purchase_price` are stored as user-provided
+
+The is_first_edition flag is **not** folded into the variant string. The variant column and the is_first_edition column are independent fields on the parsed collection row.
 
 ---
 
@@ -193,7 +220,13 @@ CREATE TABLE collection_sessions (
 CREATE INDEX idx_collection_sessions_expires ON collection_sessions (expires_at);
 ```
 
-The `collection` JSONB column stores the parsed and matched collection — a list of objects each containing the card_id, condition, variant, is_1st_edition, quantity, and optional purchase_price.
+The `collection` JSONB column stores the parsed and matched collection — a list of objects each containing the `card_id`, `condition`, `variant`, `is_first_edition`, `quantity`, and optional `purchase_price`.
+
+JSONB is intentional. The expected workflow is "load my entire collection" rather than "query across collections," and the entire JSONB blob comes back in a single read. A normalized child table would add complexity without enabling any required workflow.
+
+### No Authentication
+
+This story does not implement authentication. Sessions are anonymous and tied solely to the session cookie. Anyone with the deployed URL can upload a collection. For a portfolio project this is acceptable.
 
 ### Session Cleanup
 
@@ -228,9 +261,17 @@ Clears the session and the cookie. Called when the user uploads a new collection
 
 ### File Location
 
-`backend/assets/mock_collection.xlsx`
+`api/assets/mock_collection.xlsx`
 
 A pre-filled version of the collection template with realistic data. The user (you) will create and maintain this file.
+
+**For development purposes, the agent should create a starter mock collection file** containing 15-25 valid rows drawn from sets currently in the database. This ensures the feature can be tested end-to-end immediately. The user can replace this starter file with a curated mock collection later — the file path is what matters, not the specific contents.
+
+The starter mock should:
+- Contain only sets currently ingested in the database
+- Use a realistic mix of conditions
+- Have NO non-standard variants (Variant column blank for all rows) to avoid complicating early testing
+- Mix purchase price values — some rows with prices, some blank — to exercise both the with-purchase-price and without-purchase-price code paths
 
 ### Behavior
 
@@ -243,10 +284,6 @@ POST /collection/mock
 ```
 
 No request body. Returns the same response shape as `/collection/upload` on success.
-
-### Constraints
-
-The mock collection should not contain Variant values to avoid burning PPT credits on every demo click. The doc note about variants being parsed via PPT applies — keeping mock collections variant-free keeps demos fast and free.
 
 ---
 
@@ -273,6 +310,26 @@ This placeholder is sufficient for Milestone 4. A full policy can be drafted in 
 
 ---
 
+## Dependencies and Setup
+
+### Python Dependencies
+
+Add `openpyxl` to `api/pyproject.toml` if not already present. It's needed for both:
+- Generating the upload template (`GET /collection/template`)
+- Parsing user-uploaded workbooks (`POST /collection/upload`)
+- Annotating workbooks for error feedback (`POST /collection/upload/annotated`)
+- Reading the mock collection file (`POST /collection/mock`)
+
+### Post-Upload Redirect
+
+After a successful upload or mock load, redirect the user to `/collection/dashboard`. This route is built in M04_S03. For this story, the route should exist as a placeholder view that shows a brief message:
+
+> Your collection has been loaded. The dashboard is coming in the next update.
+
+The placeholder view can show the count of cards loaded (e.g. "Loaded 47 cards across 3 sets") to confirm the upload worked. Once M04_S03 is implemented, this placeholder is replaced by the full dashboard.
+
+---
+
 ## Test Cases
 
 ---
@@ -281,7 +338,7 @@ This placeholder is sufficient for Milestone 4. A full policy can be drafted in 
 
 **Steps:** Open the app and look at the sidebar.
 
-**Expected:** A new nav item "Analyze Your Collection" appears below Market Trends with the folder-account icon. Clicking it navigates to `/collection`.
+**Expected:** A new nav item "Analyze Your Collection" appears below Market Trends with the `mdi-book-search` icon. Clicking it navigates to `/collection`.
 
 ---
 
@@ -300,7 +357,7 @@ This placeholder is sufficient for Milestone 4. A full policy can be drafted in 
 2. Fill in 3-5 valid rows
 3. Upload the file
 
-**Expected:** The page redirects to the dashboard (which won't render data until M04_S03 is complete, but the route should change). A `collection_sessions` row exists in the database with the parsed collection in the `collection` JSONB column. A session cookie is set on the browser.
+**Expected:** The page redirects to the dashboard placeholder route. A `collection_sessions` row exists in the database with the parsed collection in the `collection` JSONB column. A session cookie is set on the browser.
 
 ---
 
@@ -308,7 +365,7 @@ This placeholder is sufficient for Milestone 4. A full policy can be drafted in 
 
 **Steps:** Click **Use Mock Collection**.
 
-**Expected:** The mock collection processes through the same validation flow and a session is created. No file picker appears. The redirect to the dashboard happens.
+**Expected:** The mock collection processes through the same validation flow and a session is created. No file picker appears. The redirect to the dashboard placeholder happens.
 
 ---
 
@@ -332,44 +389,71 @@ This placeholder is sufficient for Milestone 4. A full policy can be drafted in 
 
 ---
 
-### TC07 — Variant parsing via PPT
+### TC07 — Variant normalization splits on separators
 
-**Steps:** Fill in a row with `Card Name = "Charizard"`, `Variant = "Reverse Holo"`. Upload.
+**Steps:** Upload a row with `Variant = "Reverse Holo, Misprint"`.
 
-**Expected:** The backend calls the PPT parse-title endpoint. If confidence is high, the row is accepted with the variant stored. If confidence is low, the row is flagged in the error report with the suggestion to remove it.
-
----
-
-### TC08 — Variant column blank skips PPT call
-
-**Steps:** Upload a collection with all Variant cells blank.
-
-**Expected:** No PPT parse-title API calls are made. Verify by checking the API response logs or PPT credit consumption.
+**Expected:** The parsed collection stores two variants for this row: `"Reverse Holo"` and `"Misprint"`. The session JSON reflects this as two separate values associated with the same card.
 
 ---
 
-### TC09 — Session persists across refresh
+### TC08 — Variant Title Case with acronym preservation
+
+**Steps:** Upload three rows with these variant values:
+- Row A: `reverse holo`
+- Row B: `1st edition holo`
+- Row C: `PSA graded`
+
+**Expected:** Stored variants are `Reverse Holo`, `1st Edition Holo`, `PSA Graded` respectively.
+
+---
+
+### TC09 — Variant column blank treated as Standard
+
+**Steps:** Upload rows with the Variant column empty.
+
+**Expected:** The parsed row's variant field is null/blank. No PPT call is made. No external API is hit during normalization.
+
+---
+
+### TC10 — is_first_edition stored as separate field
+
+**Steps:** Upload a row with `Variant = "Reverse Holo"` and `Is 1st Edition = TRUE`.
+
+**Expected:** The parsed row has both `variant = "Reverse Holo"` AND `is_first_edition = true` as separate fields. The variant string is NOT modified to include "1st Edition".
+
+---
+
+### TC11 — Blank Is 1st Edition treated as FALSE
+
+**Steps:** Upload a row with the Is 1st Edition column blank.
+
+**Expected:** Validation passes. The parsed row has `is_first_edition = false`.
+
+---
+
+### TC12 — Session persists across refresh
 
 **Steps:**
 1. Upload a valid collection
 2. Refresh the browser
 
-**Expected:** The session is restored — the dashboard still shows the user's collection data without requiring a re-upload. The session cookie is still present.
+**Expected:** The session is restored — the dashboard placeholder still shows the collection's card count without requiring a re-upload. The session cookie is still present.
 
 ---
 
-### TC10 — Session expires after 24 hours
+### TC13 — Session expires after 24 hours
 
 **Steps:**
 1. Upload a collection
 2. Manually update the session's `expires_at` in the database to a time in the past
 3. Refresh the browser
 
-**Expected:** The dashboard shows the empty state (no collection loaded) and the user is prompted to upload again. The expired session row is eventually cleaned up by the nightly job.
+**Expected:** The dashboard placeholder shows the empty state (no collection loaded) and the user is prompted to upload again. The expired session row is eventually cleaned up by the nightly job.
 
 ---
 
-### TC11 — Privacy policy link works
+### TC14 — Privacy policy link works
 
 **Steps:** From the collection page, click the **View privacy policy** link.
 
@@ -377,7 +461,7 @@ This placeholder is sufficient for Milestone 4. A full policy can be drafted in 
 
 ---
 
-### TC12 — Cookie has correct security flags
+### TC15 — Cookie has correct security flags
 
 **Steps:** After uploading, inspect the session cookie in browser dev tools.
 
@@ -385,17 +469,17 @@ This placeholder is sufficient for Milestone 4. A full policy can be drafted in 
 
 ---
 
-### TC13 — Re-upload replaces previous session
+### TC16 — Re-upload replaces previous session
 
 **Steps:**
 1. Upload a collection
 2. Without leaving the app, upload a different collection
 
-**Expected:** The previous session is cleared and replaced. The dashboard reflects the new collection data, not the old one.
+**Expected:** The previous session is cleared and replaced. The dashboard placeholder reflects the new collection data, not the old one.
 
 ---
 
-### TC14 — Unrecognized columns are ignored on re-upload
+### TC17 — Unrecognized columns are ignored on re-upload
 
 **Steps:**
 1. Upload a collection with errors
@@ -406,10 +490,34 @@ This placeholder is sufficient for Milestone 4. A full policy can be drafted in 
 
 ---
 
-### TC15 — Cleanup job removes expired sessions
+### TC18 — Cleanup job removes expired sessions
 
 **Steps:**
 1. Manually create a session with `expires_at` in the past
 2. Trigger the nightly workflow
 
 **Expected:** After the workflow completes, the expired session row is no longer in the database. Active sessions are not affected.
+
+---
+
+### TC19 — No external API calls during upload
+
+**Steps:** Upload a collection containing rows with various non-standard variants. Watch network egress from the API server.
+
+**Expected:** No outbound calls to `pokemonpricetracker.com` or any other external API are made during the upload flow. Variant normalization is purely in-process.
+
+---
+
+## Notes for the Agent
+
+**No external parser is used for variant handling.** The PPT parse-title API is explicitly not part of this story. All variant normalization happens in-process using the rules described in the Variant Handling section. Do not add PPT credit costs, caching tables, or any infrastructure related to external parsing.
+
+**`is_first_edition` and `variant` are independent fields on the parsed row.** They are NOT combined into a single variant string. The dashboard's variant chart and slicer (M04_S04) treat them as two separate filter dimensions where the same card can contribute to both.
+
+**Mock collection is variant-free for early testing.** The starter mock you generate should have all variants blank to keep early testing simple. The user may expand the mock with variants later.
+
+**JSONB for session storage is intentional.** Don't second-guess this in favor of a normalized child table. The workflow is "load my full collection in one read" — JSONB is the right shape for that.
+
+**No authentication.** Sessions are anonymous and tied to a cookie only. Anyone with the deployed URL can upload. Do not add auth.
+
+**Backend directory is `api/`, not `backend/`.** Earlier drafts of this doc referenced `backend/assets/mock_collection.xlsx`. The correct path is `api/assets/mock_collection.xlsx`.

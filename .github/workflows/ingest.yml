@@ -92,6 +92,15 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: uv run python run_refresh_multipliers.py
 
+      # Sweep expired user collection sessions. Cheap, idempotent, and the
+      # only maintenance the collection_sessions table needs.
+      - name: Clean up expired collection sessions
+        if: success()
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python cleanup_sessions.py
+
       - name: Upload ingestion log
         if: always()
         uses: actions/upload-artifact@v4

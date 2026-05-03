@@ -16,6 +16,7 @@ from models.canonical import (
     VariantAlias,
 )
 from models.card import Card, PriceSnapshot
+from models.collection_session import CollectionSession
 from models.condition_multiplier import ConditionMultiplier
 from models.set import Set
 from models.set_identifier import SetIdentifier
@@ -32,6 +33,7 @@ __all__ = [
     "CanonicalVariant",
     "ConditionAlias",
     "ConditionMultiplier",
+    "CollectionSession",
     "RarityAlias",
     "VariantAlias",
 ]
