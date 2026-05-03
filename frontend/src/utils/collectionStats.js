@@ -221,10 +221,15 @@ export function variantBars(cards) {
 }
 
 function collectVariantTokens(card) {
+  // Mirrors variantTokensForCard's exclusion rules: "Unlimited" (case
+  // -insensitive) is treated as standard print and never gets its own
+  // bar on the variant chart.
   const tokens = [];
   if (Array.isArray(card.variant)) {
     for (const v of card.variant) {
-      if (v && !tokens.includes(v)) tokens.push(v);
+      if (!v) continue;
+      if (v.trim().toLowerCase() === "unlimited") continue;
+      if (!tokens.includes(v)) tokens.push(v);
     }
   }
   if (card.is_first_edition && !tokens.includes("1st Edition")) {

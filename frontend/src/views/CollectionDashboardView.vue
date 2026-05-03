@@ -62,6 +62,14 @@
       />
     </template>
 
+    <CollectionSlicerPanel
+      v-if="!loading && !error && cards.length > 0"
+      :cards="cards"
+      :filter-state="filterState"
+      :collapsed="slicersCollapsed"
+      @update:collapsed="onSlicersCollapsedChange"
+    />
+
     <v-snackbar
       v-model="excelToast"
       color="error"
@@ -96,6 +104,7 @@ import CollectionKpis from '../components/collection/CollectionKpis.vue'
 import CollectionMoversChart from '../components/collection/CollectionMoversChart.vue'
 import CollectionPriceOverTime from '../components/collection/CollectionPriceOverTime.vue'
 import CollectionSetsTable from '../components/collection/CollectionSetsTable.vue'
+import CollectionSlicerPanel from '../components/collection/CollectionSlicerPanel.vue'
 import CollectionTopCardsTable from '../components/collection/CollectionTopCardsTable.vue'
 import CollectionTreemap from '../components/collection/CollectionTreemap.vue'
 import CollectionValuePie from '../components/collection/CollectionValuePie.vue'
@@ -133,6 +142,12 @@ const timeWindow = ref('30d')
 // the user's chosen layout.
 const topCardsCollapsed = ref(route.query.topCollapsed === '1')
 const setsCollapsed = ref(route.query.setsCollapsed === '1')
+const slicersCollapsed = ref(route.query.slicersCollapsed === 'true')
+
+function onSlicersCollapsedChange(value) {
+  slicersCollapsed.value = value
+  patchQuery({ slicersCollapsed: value ? 'true' : undefined })
+}
 
 function onTopCardsCollapsedChange(value) {
   topCardsCollapsed.value = value

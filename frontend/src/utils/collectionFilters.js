@@ -61,6 +61,13 @@ export function filterCards(cards, state) {
  * contributes a single ``"Standard"`` token so it can still appear in
  * filter dropdowns built from the collection's distinct values.
  *
+ * The literal text "Unlimited" is treated as Standard. The original
+ * print run on Jungle / Fossil / WotC-era sets is the same printing
+ * the dashboard considers "no variant"; users who type ``Unlimited``
+ * into the variant cell intend the standard finish, not a separate
+ * variant. We strip it here (case-insensitive) before the tokens are
+ * counted so the Standard / 1st Edition fallback fires correctly.
+ *
  * @param {{variant?: string[], is_first_edition?: boolean}} card
  * @returns {string[]}
  */
@@ -68,7 +75,9 @@ export function variantTokensForCard(card) {
   const tokens = [];
   if (Array.isArray(card.variant)) {
     for (const v of card.variant) {
-      if (v && !tokens.includes(v)) tokens.push(v);
+      if (!v) continue;
+      if (v.trim().toLowerCase() === "unlimited") continue;
+      if (!tokens.includes(v)) tokens.push(v);
     }
   }
   if (card.is_first_edition && !tokens.includes("1st Edition")) {
