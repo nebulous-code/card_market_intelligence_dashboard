@@ -262,4 +262,19 @@ describe("variantBars", () => {
     ]);
     expect(out.map((b) => b.variant)).toEqual(["Reverse Holo", "Holo"]);
   });
+
+  it("excludes Unlimited from variant bars (treated as Standard)", () => {
+    expect(
+      variantBars([card({ variant: ["Unlimited"], is_first_edition: false })]),
+    ).toEqual([]);
+  });
+
+  it("keeps non-Unlimited variants when both appear on the same card", () => {
+    const out = variantBars([
+      card({ variant: ["Unlimited", "Misprint"], quantity: 2 }),
+    ]);
+    expect(out).toEqual([
+      { variant: "Misprint", quantity: 2, unique_cards: 1 },
+    ]);
+  });
 });

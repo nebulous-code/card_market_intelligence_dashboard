@@ -147,6 +147,41 @@ describe("variantTokensForCard", () => {
       "Standard",
     ]);
   });
+
+  it("treats 'Unlimited' as Standard (case-insensitive)", () => {
+    // Jungle/Fossil Unlimited cards print exactly the same as the
+    // standard run -- the variant chip should not split them out.
+    expect(
+      variantTokensForCard({ variant: ["Unlimited"], is_first_edition: false }),
+    ).toEqual(["Standard"]);
+    expect(
+      variantTokensForCard({ variant: ["unlimited"], is_first_edition: false }),
+    ).toEqual(["Standard"]);
+    expect(
+      variantTokensForCard({
+        variant: ["  UNLIMITED  "],
+        is_first_edition: false,
+      }),
+    ).toEqual(["Standard"]);
+  });
+
+  it("keeps non-Unlimited variants alongside dropped Unlimited entries", () => {
+    expect(
+      variantTokensForCard({
+        variant: ["Reverse Holo", "Unlimited"],
+        is_first_edition: false,
+      }),
+    ).toEqual(["Reverse Holo"]);
+  });
+
+  it("layers '1st Edition' onto an Unlimited-only card", () => {
+    expect(
+      variantTokensForCard({
+        variant: ["Unlimited"],
+        is_first_edition: true,
+      }),
+    ).toEqual(["1st Edition"]);
+  });
 });
 
 
