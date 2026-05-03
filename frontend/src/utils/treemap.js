@@ -93,15 +93,13 @@ function consolidateOthers(rows, setTotal) {
   const head = rows.slice(0, cutIndex).map((r) => rowEntry(r))
   const tail = rows.slice(cutIndex)
   const tailValue = tail.reduce((acc, r) => acc + r.value, 0)
-  const topCardInTail = tail.reduce(
-    (best, r) => (best === null || r.value > best.value ? r : best),
-    null,
-  )
+  // rows arrive sorted by value descending, so the first row of the
+  // tail is the most valuable card in the consolidated group.
   head.push({
     card_name: `Other (${tail.length} cards)`,
     value: tailValue,
     count: tail.length,
-    top_card_name: topCardInTail?.card_name ?? null,
+    top_card_name: tail[0].card_name,
     is_other: true,
   })
   return head

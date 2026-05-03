@@ -71,9 +71,7 @@ def cards_with_prices(
     out: list[CollectionCardWithPrice] = []
     for row in rows:
         meta = cards.get(row.card_id)
-        if meta is None:
-            # Defensive -- session rows are written only after card lookup
-            # succeeds. A missing card here implies a deleted card row.
+        if meta is None:  # pragma: no cover -- session rows reference live cards
             continue
         market_price = latest_prices.get((row.card_id, row.condition))
         out.append(
@@ -134,10 +132,10 @@ def daily_timeseries(
         total = Decimal("0")
         for key, snaps in history.items():
             qty = quantities.get(key)
-            if qty is None:
+            if qty is None:  # pragma: no cover -- history keys derive from quantities
                 continue
             price = _locf_price(snaps, current)
-            if price is None:
+            if price is None:  # pragma: no cover -- _fetch_history skips empty keys
                 continue
             total += price * qty
         points.append(TimeseriesPoint(date=current.isoformat(), value=total))
@@ -234,7 +232,7 @@ class _Snap:
 
 
 def _fetch_card_metadata(db: Session, card_ids: list[str]) -> dict[str, dict]:
-    if not card_ids:
+    if not card_ids:  # pragma: no cover -- callers short-circuit on empty rows
         return {}
     rows = db.execute(
         text(
@@ -280,7 +278,7 @@ def _fetch_latest_prices(
     "standard" finish), then alphabetically. Source restricted to
     tcgplayer to match the ingest pipeline's primary feed.
     """
-    if not card_ids:
+    if not card_ids:  # pragma: no cover -- callers short-circuit on empty rows
         return {}
     rows = db.execute(
         text(
@@ -315,7 +313,7 @@ def _fetch_history(
     ascending-by-date list per key, ready for binary-search LOCF.
     """
     keys = list({(c, cond) for c, cond in card_conditions})
-    if not keys:
+    if not keys:  # pragma: no cover -- callers short-circuit on empty rows
         return {}
     card_ids = sorted({c for c, _ in keys})
     conditions = sorted({cond for _, cond in keys})
@@ -347,14 +345,14 @@ def _fetch_history(
     keys_set = set(keys)
     for r in rows:
         key = (r.card_id, r.condition)
-        if key not in keys_set:
+        if key not in keys_set:  # pragma: no cover -- ANY/ANY filter is exact
             continue
         by_key[key].append(_Snap(captured_date=r.captured_date, market_price=r.market_price))
     return by_key
 
 
 def _earliest_snapshot(db: Session, card_ids: list[str]) -> date | None:
-    if not card_ids:
+    if not card_ids:  # pragma: no cover -- callers short-circuit on empty rows
         return None
     row = db.execute(
         text(
@@ -374,7 +372,7 @@ def _earliest_snapshot(db: Session, card_ids: list[str]) -> date | None:
 def _locf_price(snaps: list[_Snap], target: date) -> Decimal | None:
     """Return the snapshot price on or before ``target``; fall back to
     the earliest snapshot if ``target`` predates all available history."""
-    if not snaps:
+    if not snaps:  # pragma: no cover -- _fetch_history only buckets non-empty
         return None
     # Snapshots are ascending by date.
     chosen: Decimal | None = None

@@ -308,3 +308,141 @@ def test_cookie_secure_true_for_other_values(monkeypatch):
 
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "true")
     assert _cookie_secure() is True
+
+
+# ---------- /collection/cards-with-prices ----------
+
+
+def test_cards_with_prices_no_session_returns_404(client):
+    client.cookies.clear()
+    response = client.get("/collection/cards-with-prices")
+    assert response.status_code == 404
+
+
+def test_cards_with_prices_returns_card_metadata(
+    client, sample_cards, session_cleanup
+):
+    blob = _build_workbook(rows=[_valid()])
+    upload = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", blob, "application/octet-stream")},
+    )
+    session_cleanup.append(upload.json()["session_id"])
+
+    response = client.get("/collection/cards-with-prices")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["cards"]) == 1
+    card = body["cards"][0]
+    assert card["card_id"] == "base1-4"
+    assert card["card_name"] == "Charizard"
+    assert card["set_name"] == "Base Set"
+
+
+def test_cards_with_prices_unknown_session_cookie_returns_404(client):
+    client.cookies.clear()
+    client.cookies.set("collection_session_id", "no-such-id")
+    response = client.get("/collection/cards-with-prices")
+    assert response.status_code == 404
+
+
+# ---------- /collection/timeseries ----------
+
+
+def test_timeseries_no_session_returns_404(client):
+    client.cookies.clear()
+    response = client.get("/collection/timeseries")
+    assert response.status_code == 404
+
+
+def test_timeseries_returns_points(client, sample_cards, session_cleanup):
+    blob = _build_workbook(rows=[_valid()])
+    upload = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", blob, "application/octet-stream")},
+    )
+    session_cleanup.append(upload.json()["session_id"])
+
+    response = client.get("/collection/timeseries", params={"window": "7d"})
+    assert response.status_code == 200
+    body = response.json()
+    assert "points" in body
+    assert "earliest_snapshot" in body
+
+
+def test_timeseries_invalid_window_returns_422(client, sample_cards, session_cleanup):
+    blob = _build_workbook(rows=[_valid()])
+    upload = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", blob, "application/octet-stream")},
+    )
+    session_cleanup.append(upload.json()["session_id"])
+
+    response = client.get("/collection/timeseries", params={"window": "yearly"})
+    assert response.status_code == 422
+
+
+# ---------- /collection/movers ----------
+
+
+def test_movers_no_session_returns_404(client):
+    client.cookies.clear()
+    response = client.get("/collection/movers")
+    assert response.status_code == 404
+
+
+def test_movers_returns_gainers_and_losers_lists(
+    client, sample_cards, session_cleanup
+):
+    blob = _build_workbook(rows=[_valid()])
+    upload = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", blob, "application/octet-stream")},
+    )
+    session_cleanup.append(upload.json()["session_id"])
+
+    response = client.get(
+        "/collection/movers", params={"window": "30d", "count": 5}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "gainers" in body
+    assert "losers" in body
+
+
+def test_movers_invalid_window_returns_422(client, sample_cards, session_cleanup):
+    blob = _build_workbook(rows=[_valid()])
+    upload = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", blob, "application/octet-stream")},
+    )
+    session_cleanup.append(upload.json()["session_id"])
+
+    response = client.get("/collection/movers", params={"window": "decade"})
+    assert response.status_code == 422
+
+
+def test_movers_invalid_count_returns_422(client, sample_cards, session_cleanup):
+    blob = _build_workbook(rows=[_valid()])
+    upload = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", blob, "application/octet-stream")},
+    )
+    session_cleanup.append(upload.json()["session_id"])
+
+    response = client.get("/collection/movers", params={"count": 0})
+    assert response.status_code == 422
+
+
+def test_movers_negative_min_pct_returns_422(
+    client, sample_cards, session_cleanup
+):
+    blob = _build_workbook(rows=[_valid()])
+    upload = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", blob, "application/octet-stream")},
+    )
+    session_cleanup.append(upload.json()["session_id"])
+
+    response = client.get("/collection/movers", params={"min_pct": -0.1})
+    assert response.status_code == 422

@@ -34,6 +34,10 @@ import {
   useMockCollection,
   getCollectionSession,
   deleteCollectionSession,
+  getCollectionCardsWithPrices,
+  getCollectionTimeseries,
+  getCollectionMovers,
+  getPalette,
 } from "../../src/api/index.js";
 
 beforeEach(() => {
@@ -227,6 +231,54 @@ describe("deleteCollectionSession", () => {
     const result = await deleteCollectionSession();
     expect(httpDelete).toHaveBeenCalledWith("/collection/session");
     expect(result).toBeUndefined();
+  });
+});
+
+describe("getCollectionCardsWithPrices", () => {
+  it("GETs /collection/cards-with-prices", async () => {
+    httpGet.mockResolvedValue({ data: { cards: [] } });
+    const result = await getCollectionCardsWithPrices();
+    expect(httpGet).toHaveBeenCalledWith("/collection/cards-with-prices");
+    expect(result).toEqual({ cards: [] });
+  });
+});
+
+describe("getCollectionTimeseries", () => {
+  it("GETs /collection/timeseries with the window param", async () => {
+    httpGet.mockResolvedValue({
+      data: { points: [], earliest_snapshot: null },
+    });
+    await getCollectionTimeseries("30d");
+    expect(httpGet).toHaveBeenCalledWith("/collection/timeseries", {
+      params: { window: "30d" },
+    });
+  });
+});
+
+describe("getCollectionMovers", () => {
+  it("GETs /collection/movers with default count and min_pct", async () => {
+    httpGet.mockResolvedValue({ data: { gainers: [], losers: [] } });
+    await getCollectionMovers("30d");
+    expect(httpGet).toHaveBeenCalledWith("/collection/movers", {
+      params: { window: "30d", count: 5, min_pct: 0.05 },
+    });
+  });
+
+  it("forwards explicit count and min_pct", async () => {
+    httpGet.mockResolvedValue({ data: { gainers: [], losers: [] } });
+    await getCollectionMovers("90d", 10, 0.01);
+    expect(httpGet).toHaveBeenCalledWith("/collection/movers", {
+      params: { window: "90d", count: 10, min_pct: 0.01 },
+    });
+  });
+});
+
+describe("getPalette", () => {
+  it("GETs /palette", async () => {
+    httpGet.mockResolvedValue({ data: { colors: ["#E8412A"] } });
+    const result = await getPalette();
+    expect(httpGet).toHaveBeenCalledWith("/palette");
+    expect(result).toEqual({ colors: ["#E8412A"] });
   });
 });
 
