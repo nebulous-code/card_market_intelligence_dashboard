@@ -15,6 +15,18 @@
       <router-link to="/privacy" class="privacy-link">View privacy policy</router-link>
     </div>
 
+    <v-alert
+      v-if="emptyRedirect"
+      type="info"
+      variant="tonal"
+      class="mb-4"
+      closable
+      @click:close="dismissEmptyBanner"
+    >
+      <strong>No collection loaded yet</strong> &mdash; upload your collection
+      or use the mock collection to get started.
+    </v-alert>
+
     <v-row class="mb-6">
       <v-col cols="12" md="4">
         <v-card class="action-card h-100" :loading="downloading">
@@ -113,8 +125,8 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   downloadAnnotatedWorkbook,
   downloadCollectionTemplate,
@@ -122,7 +134,16 @@ import {
   useMockCollection,
 } from '../api/index.js'
 
+const route = useRoute()
 const router = useRouter()
+
+const emptyRedirect = computed(() => route.query.empty === '1')
+
+function dismissEmptyBanner() {
+  // Drop the ?empty=1 marker so a refresh doesn't re-show the banner.
+  const { empty: _omit, ...rest } = route.query
+  router.replace({ query: rest })
+}
 
 const downloading = ref(false)
 const uploading = ref(false)

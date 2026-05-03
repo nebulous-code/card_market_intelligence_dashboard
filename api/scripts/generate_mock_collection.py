@@ -41,7 +41,45 @@ from database import SessionLocal
 PREFERRED_SETS = ("base1", "base2", "base3", "sv03.5")
 ROWS_PER_SET = 5
 CONDITIONS = ("NM", "NM", "LP", "MP", "HP", "DMG")
-PURCHASE_PRICE_TEMPLATE = (250.00, None, 12.50, None, 5.00)
+# Mix of blank, single, and multi-variant entries plus a couple of
+# 1st-edition rows so the dashboard's variant chart and 1st-Ed bucket
+# are exercised by the bundled mock.
+VARIANTS = (
+    None,
+    None,
+    "Reverse Holo",
+    None,
+    "Holo",
+    None,
+    "Reverse Holo, Misprint",
+    None,
+    "Shadowless",
+    None,
+)
+FIRST_EDITION_FLAGS = (
+    "FALSE",
+    "FALSE",
+    "FALSE",
+    "FALSE",
+    "TRUE",
+    "FALSE",
+    "FALSE",
+    "TRUE",
+    "FALSE",
+    "FALSE",
+)
+PURCHASE_PRICE_TEMPLATE = (
+    250.00,
+    180.00,
+    12.50,
+    None,
+    5.00,
+    320.00,
+    None,
+    25.00,
+    8.50,
+    None,
+)
 OUTPUT = API_ROOT / "assets" / "mock_collection.xlsx"
 
 
@@ -68,6 +106,8 @@ def _gather_rows(db) -> list[dict]:
     out: list[dict] = []
     cond_cycle = cycle(CONDITIONS)
     price_cycle = cycle(PURCHASE_PRICE_TEMPLATE)
+    variant_cycle = cycle(VARIANTS)
+    first_ed_cycle = cycle(FIRST_EDITION_FLAGS)
     for set_id in PREFERRED_SETS:
         info = db.execute(
             text("SELECT id, name FROM sets WHERE id = :id"),
@@ -93,7 +133,8 @@ def _gather_rows(db) -> list[dict]:
                     "card_number": card.number,
                     "card_name": card.name,
                     "condition": next(cond_cycle),
-                    "is_first_edition": "FALSE",
+                    "variant": next(variant_cycle),
+                    "is_first_edition": next(first_ed_cycle),
                     "quantity": 1,
                     "purchase_price": next(price_cycle),
                 }
@@ -126,7 +167,7 @@ def _build_workbook(rows: list[dict]) -> Workbook:
         ws.cell(row=row_idx, column=2, value=entry["card_number"])
         ws.cell(row=row_idx, column=3, value=entry["card_name"])
         ws.cell(row=row_idx, column=4, value=entry["condition"])
-        ws.cell(row=row_idx, column=5, value=None)
+        ws.cell(row=row_idx, column=5, value=entry["variant"])
         ws.cell(row=row_idx, column=6, value=entry["is_first_edition"])
         ws.cell(row=row_idx, column=7, value=entry["quantity"])
         ws.cell(row=row_idx, column=8, value=entry["purchase_price"])

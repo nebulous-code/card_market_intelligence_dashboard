@@ -1,14 +1,20 @@
 <template>
   <v-container class="py-6">
 
-    <!-- Back button — goes to the set this card belongs to once loaded -->
+    <!--
+      Back button. Default destination is the parent set. When the user
+      arrived from the Collection Dashboard (?from=collection), route
+      back to the dashboard instead so they don't lose context. The
+      breadcrumb trail above still points at the set, since that's the
+      logical parent of the card.
+    -->
     <v-btn
-      :to="card ? `/sets/${card.set_id}` : '/sets'"
+      :to="backDestination"
       variant="text"
       prepend-icon="mdi-arrow-left"
       class="mb-4"
     >
-      {{ card ? (card.set_display_name ?? card.set_id) : 'Sets' }}
+      {{ backLabel }}
     </v-btn>
 
     <!-- Loading state -->
@@ -167,6 +173,22 @@ ChartJS.register(Title, Tooltip, Legend, LineElement, PointElement, CategoryScal
 
 const route = useRoute();
 const cardId = route.params.cardId;
+
+// Back-button destination depends on where the user came from. Routes
+// inside the app pass ?from=collection when linking from the Collection
+// Dashboard so the back button cycles back there instead of dumping the
+// user on a set page they didn't visit.
+const fromCollection = computed(() => route.query.from === "collection");
+const backDestination = computed(() => {
+  if (fromCollection.value) return "/collection/dashboard";
+  return card.value ? `/sets/${card.value.set_id}` : "/sets";
+});
+const backLabel = computed(() => {
+  if (fromCollection.value) return "Dashboard";
+  return card.value
+    ? card.value.set_display_name ?? card.value.set_id
+    : "Sets";
+});
 
 const setCrumb = inject('setCrumb', () => {})
 const clearCrumbs = inject('clearCrumbs', () => {})

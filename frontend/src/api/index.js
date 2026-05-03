@@ -272,3 +272,54 @@ export async function getCollectionSession() {
 export async function deleteCollectionSession() {
   await http.delete("/collection/session");
 }
+
+/**
+ * Fetch the dashboard's full card list -- one row per session line item
+ * joined to the latest market price + card metadata.
+ *
+ * @returns {Promise<{cards: Array}>}
+ */
+export async function getCollectionCardsWithPrices() {
+  const { data } = await http.get("/collection/cards-with-prices");
+  return data;
+}
+
+/**
+ * Daily total collection value across the chosen window. Server-side
+ * Last Observation Carried Forward fills missing days.
+ *
+ * @param {"7d"|"30d"|"90d"|"6m"|"all"} window
+ * @returns {Promise<{points: Array, earliest_snapshot: string|null}>}
+ */
+export async function getCollectionTimeseries(window) {
+  const { data } = await http.get("/collection/timeseries", {
+    params: { window },
+  });
+  return data;
+}
+
+/**
+ * Top gainers and losers in the chosen window, capped at ``count`` each
+ * after applying the ``min_pct`` threshold (default 5%).
+ *
+ * @param {"7d"|"30d"|"90d"|"6m"|"all"} window
+ * @param {number} [count=5]
+ * @param {number} [minPct=0.05]
+ * @returns {Promise<{gainers: Array, losers: Array}>}
+ */
+export async function getCollectionMovers(window, count = 5, minPct = 0.05) {
+  const { data } = await http.get("/collection/movers", {
+    params: { window, count, min_pct: minPct },
+  });
+  return data;
+}
+
+/**
+ * Fetch the configured chart palette in display order.
+ *
+ * @returns {Promise<{colors: string[]}>}
+ */
+export async function getPalette() {
+  const { data } = await http.get("/palette");
+  return data;
+}

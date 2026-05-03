@@ -33,12 +33,21 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from schemas.collection import (
+    CollectionCardsWithPricesResponse,
+    CollectionMoversResponse,
+    CollectionTimeseriesResponse,
     ParsedCollectionRow,
     SessionResponse,
     UploadSuccess,
     UploadValidationFailure,
 )
 from services.collection_annotator import annotate_workbook
+from services.collection_pricing import (
+    cards_with_prices,
+    daily_timeseries,
+    movers,
+    parse_window,
+)
 from services.collection_session import (
     COOKIE_MAX_AGE_SECONDS,
     COOKIE_NAME,
@@ -48,6 +57,8 @@ from services.collection_session import (
 )
 from services.collection_template import build_template_workbook, template_filename
 from services.collection_validator import validate_workbook
+
+from decimal import Decimal
 
 
 XLSX_MEDIA_TYPE = (
@@ -206,6 +217,75 @@ def read_session(
         card_count=card_count,
         set_count=set_count,
     )
+
+
+def _require_session_rows(
+    db: Session,
+    collection_session_id: str | None,
+) -> list[ParsedCollectionRow]:
+    """Look up the active session or raise 404.
+
+    Centralised so all dashboard endpoints share a single 404 message
+    and the cookie/session decoupling lives in one place.
+    """
+    if not collection_session_id:
+        raise HTTPException(status_code=404, detail="No active collection session")
+    stored = get_session(db, collection_session_id)
+    if stored is None:
+        raise HTTPException(status_code=404, detail="No active collection session")
+    return stored.rows
+
+
+@router.get("/cards-with-prices", response_model=CollectionCardsWithPricesResponse)
+def get_cards_with_prices(
+    db: Session = Depends(get_db),
+    collection_session_id: str | None = Cookie(default=None, alias=COOKIE_NAME),
+) -> CollectionCardsWithPricesResponse:
+    """Session rows joined to current market prices + card metadata."""
+    rows = _require_session_rows(db, collection_session_id)
+    cards = cards_with_prices(db, rows)
+    return CollectionCardsWithPricesResponse(cards=cards)
+
+
+@router.get("/timeseries", response_model=CollectionTimeseriesResponse)
+def get_timeseries(
+    window: str | None = None,
+    db: Session = Depends(get_db),
+    collection_session_id: str | None = Cookie(default=None, alias=COOKIE_NAME),
+) -> CollectionTimeseriesResponse:
+    """Daily total ``quantity * price`` for the chosen window."""
+    rows = _require_session_rows(db, collection_session_id)
+    try:
+        normalized_window = parse_window(window)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    points, earliest = daily_timeseries(db, rows, normalized_window)
+    return CollectionTimeseriesResponse(
+        points=points,
+        earliest_snapshot=earliest.isoformat() if earliest else None,
+    )
+
+
+@router.get("/movers", response_model=CollectionMoversResponse)
+def get_movers(
+    window: str | None = None,
+    count: int = 5,
+    min_pct: Decimal = Decimal("0.05"),
+    db: Session = Depends(get_db),
+    collection_session_id: str | None = Cookie(default=None, alias=COOKIE_NAME),
+) -> CollectionMoversResponse:
+    """Top ``count`` gainers and losers above ``min_pct`` movement."""
+    rows = _require_session_rows(db, collection_session_id)
+    try:
+        normalized_window = parse_window(window)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if count < 1:
+        raise HTTPException(status_code=422, detail="count must be >= 1")
+    if min_pct < 0:
+        raise HTTPException(status_code=422, detail="min_pct must be >= 0")
+    gainers, losers = movers(db, rows, normalized_window, count, min_pct)
+    return CollectionMoversResponse(gainers=gainers, losers=losers)
 
 
 @router.delete("/session", status_code=204)

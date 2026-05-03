@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import the URL route groups: sets, cards, reference data, trends, and liveness.
-from routers import cards, collection, health, reference, sets, trends
+from routers import cards, collection, health, palette, reference, sets, trends
 
 
 @asynccontextmanager
@@ -102,6 +102,7 @@ app.include_router(cards.router)      # handles /cards/{id}
 app.include_router(reference.router)  # handles /reference/conditions, /reference/variants, /reference/rarities
 app.include_router(trends.router)     # handles /trends/* (condition multipliers, future analyses)
 app.include_router(collection.router) # handles /collection/* (template, upload, mock, session)
+app.include_router(palette.router)    # handles /palette (color palette for dashboard charts)
 app.include_router(health.router)     # handles /health (used by the cold-start loader)
 
 

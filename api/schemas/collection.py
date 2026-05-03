@@ -61,3 +61,76 @@ class SessionResponse(BaseModel):
     rows: list[ParsedCollectionRow]
     card_count: int
     set_count: int
+
+
+class CollectionCardWithPrice(BaseModel):
+    """One session row joined to current pricing + card metadata.
+
+    The dashboard treats each row as a single line item; the same card
+    can appear multiple times if the user owns it in different
+    conditions / variants / 1st-edition states.
+    """
+
+    card_id: str
+    card_name: str
+    image_url: str | None = None
+    rarity: str | None = None
+    supertype: str | None = None
+    set_id: str
+    set_name: str
+    printed_total: int
+    total_count: int
+    condition: str
+    variant: list[str]
+    is_first_edition: bool
+    quantity: int
+    market_price: Decimal | None = None
+    purchase_price: Decimal | None = None
+
+
+class CollectionCardsWithPricesResponse(BaseModel):
+    """Top-level response for GET /collection/cards-with-prices."""
+
+    cards: list[CollectionCardWithPrice]
+
+
+class TimeseriesPoint(BaseModel):
+    """One day on the price-over-time chart."""
+
+    date: str  # ISO date (YYYY-MM-DD)
+    value: Decimal
+
+
+class CollectionTimeseriesResponse(BaseModel):
+    """Daily total collection value across the chosen window.
+
+    ``earliest_snapshot`` is the oldest snapshot in the user's collection
+    (across all cards) so the frontend can disable presets that predate
+    the available data.
+    """
+
+    points: list[TimeseriesPoint]
+    earliest_snapshot: str | None = None
+
+
+class CollectionMover(BaseModel):
+    """One row of the gainers or losers list."""
+
+    card_id: str
+    card_name: str
+    set_id: str
+    set_name: str
+    condition: str
+    variant: list[str]
+    is_first_edition: bool
+    start_price: Decimal
+    current_price: Decimal
+    change_pct: Decimal
+    change_dollars: Decimal
+
+
+class CollectionMoversResponse(BaseModel):
+    """Top-level response for GET /collection/movers."""
+
+    gainers: list[CollectionMover]
+    losers: list[CollectionMover]
