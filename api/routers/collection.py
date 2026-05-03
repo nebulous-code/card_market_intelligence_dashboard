@@ -42,6 +42,11 @@ from schemas.collection import (
     UploadValidationFailure,
 )
 from services.collection_annotator import annotate_workbook
+from services.collection_excel import (
+    EXCEL_MEDIA_TYPE,
+    excel_filename,
+    populate_template,
+)
 from services.collection_pricing import (
     cards_with_prices,
     daily_timeseries,
@@ -286,6 +291,36 @@ def get_movers(
         raise HTTPException(status_code=422, detail="min_pct must be >= 0")
     gainers, losers = movers(db, rows, normalized_window, count, min_pct)
     return CollectionMoversResponse(gainers=gainers, losers=losers)
+
+
+@router.get("/excel")
+def download_collection_excel(
+    db: Session = Depends(get_db),
+    collection_session_id: str | None = Cookie(default=None, alias=COOKIE_NAME),
+) -> StreamingResponse:
+    """Populate the collection template with the user's data and stream it.
+
+    Always returns the user's full collection -- dashboard slicer
+    state is intentionally ignored so the export is a portable copy
+    rather than a snapshot of the current view.
+    """
+    from io import BytesIO
+
+    rows = _require_session_rows(db, collection_session_id)
+    try:
+        blob = populate_template(db, rows)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Excel template is not available on this deployment. "
+                "Please regenerate api/assets/collection_template.xlsx."
+            ),
+        ) from exc
+    headers = {
+        "Content-Disposition": f'attachment; filename="{excel_filename()}"',
+    }
+    return StreamingResponse(BytesIO(blob), media_type=EXCEL_MEDIA_TYPE, headers=headers)
 
 
 @router.delete("/session", status_code=204)
