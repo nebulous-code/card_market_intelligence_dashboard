@@ -446,3 +446,60 @@ def test_movers_negative_min_pct_returns_422(
 
     response = client.get("/collection/movers", params={"min_pct": -0.1})
     assert response.status_code == 422
+
+
+# ---------- /collection/excel ----------
+
+
+def test_excel_no_session_returns_404(client):
+    client.cookies.clear()
+    response = client.get("/collection/excel")
+    assert response.status_code == 404
+
+
+def test_excel_returns_xlsx_with_attachment_header(
+    client, sample_cards, session_cleanup
+):
+    blob = _build_workbook(rows=[_valid()])
+    upload = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", blob, "application/octet-stream")},
+    )
+    session_cleanup.append(upload.json()["session_id"])
+
+    response = client.get("/collection/excel")
+    assert response.status_code == 200
+    assert (
+        response.headers["content-type"]
+        == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert response.headers["content-disposition"].startswith("attachment;")
+    assert "collection-report-" in response.headers["content-disposition"]
+    # Smoke check the bytes parse as a workbook.
+    from io import BytesIO
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(response.content))
+    assert "Collection Details" in wb.sheetnames
+
+
+def test_excel_returns_503_when_template_missing(
+    client, sample_cards, session_cleanup, monkeypatch
+):
+    """Deployments without the bundled template asset surface a clean
+    503 instead of a 500."""
+    from pathlib import Path
+
+    from services import collection_excel as mod
+
+    blob = _build_workbook(rows=[_valid()])
+    upload = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", blob, "application/octet-stream")},
+    )
+    session_cleanup.append(upload.json()["session_id"])
+
+    monkeypatch.setattr(mod, "TEMPLATE_PATH", Path("/nonexistent/template.xlsx"))
+    response = client.get("/collection/excel")
+    assert response.status_code == 503
