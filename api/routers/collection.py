@@ -88,6 +88,24 @@ def _cookie_secure() -> bool:
     return raw not in {"0", "false", "no"}
 
 
+def _cookie_samesite() -> str:
+    """SameSite attribute paired with ``_cookie_secure()``.
+
+    The deployed frontend and API live on different ``*.onrender.com``
+    subdomains. ``onrender.com`` is on the Public Suffix List, so the
+    browser treats those subdomains as separate sites and refuses to
+    send a ``SameSite=Strict`` (or even ``Lax``) cookie on the
+    cross-site XHR. ``SameSite=None`` is required for cross-site
+    credentialed requests -- and per spec that flavor requires
+    ``Secure``, which we already set in production.
+
+    Local dev runs both sides on ``http://localhost``, which is
+    same-site, so ``Lax`` is enough and avoids browsers rejecting a
+    ``SameSite=None`` cookie that lacks ``Secure``.
+    """
+    return "none" if _cookie_secure() else "lax"
+
+
 def _set_session_cookie(response: Response, session_id: str) -> None:
     response.set_cookie(
         key=COOKIE_NAME,
@@ -95,7 +113,7 @@ def _set_session_cookie(response: Response, session_id: str) -> None:
         max_age=COOKIE_MAX_AGE_SECONDS,
         httponly=True,
         secure=_cookie_secure(),
-        samesite="strict",
+        samesite=_cookie_samesite(),
         path="/",
     )
 
@@ -332,5 +350,14 @@ def clear_session(
     """Drop the session row (if any) and clear the cookie."""
     if collection_session_id:
         delete_session(db, collection_session_id)
-    response.delete_cookie(key=COOKIE_NAME, path="/")
+    # Match Secure/SameSite to the original Set-Cookie so browsers
+    # accept the deletion. Chrome silently ignores a delete that
+    # doesn't match the original cookie's flags.
+    response.delete_cookie(
+        key=COOKIE_NAME,
+        path="/",
+        secure=_cookie_secure(),
+        samesite=_cookie_samesite(),
+        httponly=True,
+    )
     return Response(status_code=204)
