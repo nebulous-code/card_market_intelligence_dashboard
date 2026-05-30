@@ -8,11 +8,11 @@ This project supports two development modes to accommodate machines with and wit
 
 | | Mode A: Containers | Mode B: Native |
 |---|---|---|
-| **Database** | Neon (cloud-hosted PostgreSQL) | Neon (cloud-hosted PostgreSQL) |
-| **API** | Docker / Podman service | Python venv |
-| **Frontend** | Docker / Podman service | `npm run dev` |
-| **Requires admin?** | WSL2 must be available | No |
-| **Best for** | Home machine, CI, deployment parity | Restricted machines |
+| Database| Neon (cloud-hosted PostgreSQL) | Neon (cloud-hosted PostgreSQL) |
+| API| Docker / Podman service | Python venv |
+| Frontend| Docker / Podman service | `npm run dev` |
+| Requires admin?| WSL2 must be available | No |
+| Best for| Home machine, CI, deployment parity | Restricted machines |
 
 ---
 
