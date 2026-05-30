@@ -30,7 +30,6 @@ from services.collection_excel import (
     _collect_historic_rows,
     _collect_multipliers_rows,
     _collect_upgrade_rows,
-    _excel_value,
     _locf_price,
     _resolve_market_price,
     _sample_dates,
@@ -79,24 +78,6 @@ def test_excel_filename_uses_today_by_default():
 
 def test_excel_filename_uses_provided_date():
     assert excel_filename(date(2026, 5, 3)) == "collection-report-2026-05-03.xlsx"
-
-
-# ---------- _excel_value ----------
-
-
-def test_excel_value_passes_through_none():
-    assert _excel_value(None) is None
-
-
-def test_excel_value_converts_decimal_to_float():
-    assert _excel_value(Decimal("1.50")) == 1.5
-    assert isinstance(_excel_value(Decimal("1.50")), float)
-
-
-def test_excel_value_passes_through_other_types():
-    assert _excel_value("text") == "text"
-    assert _excel_value(42) == 42
-    assert _excel_value(True) is True
 
 
 # ---------- _resolve_market_price ----------
@@ -452,12 +433,15 @@ def test_populate_template_writes_all_four_tables(db_session, sample_cards):
     table_names = {
         name for sheet in wb.worksheets for name in sheet.tables
     }
-    assert table_names == {
+    # The template may carry additional Tables that ship with it
+    # (e.g. Power Query output tables). We only assert that the four
+    # we populate are present.
+    assert {
         "collection_details",
         "condition_multipliers",
         "historic_prices",
         "card_prices_all_conditions",
-    }
+    }.issubset(table_names)
 
 
 def test_populate_template_preserves_template_structure(
@@ -465,13 +449,13 @@ def test_populate_template_preserves_template_structure(
 ):
     blob = populate_template(db_session, [_row("base1-4")])
     wb = load_workbook(BytesIO(blob))
-    sheet_names = [s.title for s in wb.worksheets]
-    assert sheet_names == [
+    sheet_names = {s.title for s in wb.worksheets}
+    assert {
         "Collection Details",
         "Condition Multipliers",
         "Historic Prices",
         "Card Prices",
-    ]
+    }.issubset(sheet_names)
 
 
 def test_populate_template_writes_real_booleans(db_session, sample_cards):
