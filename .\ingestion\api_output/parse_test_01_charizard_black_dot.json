@@ -1,0 +1,81 @@
+{
+  "data": {
+    "originalTitle": "Charizard Black Dot NM",
+    "sanitizedTitle": "Charizard Black Dot NM",
+    "parsed": {
+      "confidence": 0.8,
+      "condition": "Near Mint",
+      "cardName": "Charizard Black Dot",
+      "fieldConfidence": {
+        "condition": 0.85,
+        "cardName": 0.75
+      }
+    },
+    "matches": [
+      {
+        "tcgPlayerId": "657516",
+        "name": "Charizard (Black Dot Error)",
+        "setName": "Base Set",
+        "setId": 604,
+        "cardNumber": "004/102",
+        "rarity": "Holo Rare",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 8.115279197692871,
+        "matchReasons": [],
+        "language": "english",
+        "prices": {
+          "market": null,
+          "low": 700,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "83852",
+        "name": "Black Kyurem - BW58",
+        "setName": "Black and White Promos",
+        "setId": 1407,
+        "cardNumber": "BW58",
+        "rarity": "Promo",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 4.258541107177734,
+        "matchReasons": [],
+        "language": "english",
+        "prices": {
+          "market": 19.34,
+          "low": 5.08,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "83855",
+        "name": "Black Kyurem EX - BW62",
+        "setName": "Black and White Promos",
+        "setId": 1407,
+        "cardNumber": "BW62",
+        "rarity": "Promo",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 3.915893316268921,
+        "matchReasons": [],
+        "language": "english",
+        "prices": {
+          "market": 6.48,
+          "low": 1.42,
+          "mid": null,
+          "high": null
+        }
+      }
+    ]
+  },
+  "metadata": {
+    "parseTime": "2026-05-02T15:52:50.689Z",
+    "processingTimeMs": 66,
+    "confidence": 0.8,
+    "apiCallsConsumed": 3,
+    "parsingMethod": "regex-pattern-v1"
+  }
+}

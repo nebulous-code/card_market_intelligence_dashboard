@@ -1,0 +1,91 @@
+{
+  "data": {
+    "originalTitle": "Base Set Machamp 1st Edition LP",
+    "sanitizedTitle": "Base Set Machamp 1st Edition LP",
+    "parsed": {
+      "confidence": 0.825,
+      "edition": "1st Edition",
+      "condition": "Lightly Played",
+      "setName": "Base Set",
+      "cardName": "Machamp",
+      "fieldConfidence": {
+        "edition": 0.9,
+        "condition": 0.85,
+        "setName": 0.8,
+        "cardName": 0.75
+      }
+    },
+    "matches": [
+      {
+        "tcgPlayerId": "86957",
+        "name": "Machamp",
+        "setName": "Legendary Collection",
+        "setId": 1374,
+        "cardNumber": "015/110",
+        "rarity": "Holo Rare",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 3.7642784118652344,
+        "matchReasons": [
+          "Name matches \"Machamp\""
+        ],
+        "language": "english",
+        "prices": {
+          "market": 51.5,
+          "low": 16.49,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "86961",
+        "name": "Machamp",
+        "setName": "WoTC Promo",
+        "setId": 1418,
+        "cardNumber": "43/53",
+        "rarity": "Promo",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 3.7642784118652344,
+        "matchReasons": [
+          "Name matches \"Machamp\""
+        ],
+        "language": "english",
+        "prices": {
+          "market": 46.74,
+          "low": 69.99,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "86971",
+        "name": "Machamp",
+        "setName": "Hidden Legends",
+        "setId": 1416,
+        "cardNumber": "9/101",
+        "rarity": "Holo Rare",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 3.7642784118652344,
+        "matchReasons": [
+          "Name matches \"Machamp\""
+        ],
+        "language": "english",
+        "prices": {
+          "market": 42.38,
+          "low": 14.35,
+          "mid": null,
+          "high": null
+        }
+      }
+    ]
+  },
+  "metadata": {
+    "parseTime": "2026-05-02T15:52:51.697Z",
+    "processingTimeMs": 20,
+    "confidence": 0.825,
+    "apiCallsConsumed": 3,
+    "parsingMethod": "regex-pattern-v1"
+  }
+}

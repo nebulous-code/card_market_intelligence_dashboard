@@ -42,6 +42,9 @@ class PriceSnapshotResponse(BaseModel):
     id: int
     source: str
     condition: str
+    condition_label: str
+    variant: str | None
+    variant_label: str
     market_price: Decimal | None
     low_price: Decimal | None
     high_price: Decimal | None
@@ -76,6 +79,7 @@ class CardResponse(BaseModel):
     name: str
     number: str
     rarity: str | None
+    rarity_label: str | None
     supertype: str | None
     image_url: str | None
     created_at: datetime
@@ -96,9 +100,15 @@ class CardDetailResponse(CardResponse):
         latest_prices: List of the most recent price snapshots for this
             card, one per available condition. Empty if no price data
             has been ingested for this card yet.
+        set_display_name: The human-readable name of the card's set
+            (e.g. "Base Set"), joined from the sets table.
+        set_printed_total: Total cards printed in the set (e.g. 102),
+            used to format card number as "4/102".
     """
 
     latest_prices: list[PriceSnapshotResponse]
+    set_display_name: str
+    set_printed_total: int
 
 
 class PriceHistoryResponse(BaseModel):

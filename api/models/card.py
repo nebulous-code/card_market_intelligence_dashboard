@@ -101,6 +101,7 @@ class PriceSnapshot(Base):
     card_id: Mapped[str] = mapped_column(Text, ForeignKey("cards.id"), nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False)
     condition: Mapped[str] = mapped_column(Text, nullable=False)
+    variant: Mapped[str | None] = mapped_column(Text, nullable=True)
     market_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     low_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     high_price: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)

@@ -11,7 +11,7 @@ run database setup commands -- just start the server and it takes care
 of itself.
 """
 
-import subprocess
+import asyncio
 import sys
 import os
 from contextlib import asynccontextmanager
@@ -19,8 +19,39 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import the two sets of URL routes: one for sets, one for cards.
-from routers import cards, sets
+# Import the URL route groups: sets, cards, reference data, trends, and liveness.
+from routers import cards, collection, health, palette, reference, sets, trends
+
+
+async def run_migrations() -> None:
+    """Apply pending Alembic migrations without blocking app startup.
+
+    Runs as a background task so the event loop serves requests -- notably
+    the DB-free ``/wake`` probe -- the instant uvicorn is up, instead of
+    waiting on a cold database connection. On a Render free-tier wake the
+    schema is already at head, so this is a fast no-op once the (also cold)
+    Neon database accepts a connection. Decoupling it from startup is what
+    lets the cold-start loader's wake signal return immediately rather than
+    sitting behind a multi-second cold-DB connect.
+
+    Because the app is already serving, a failure can't abort startup; it is
+    surfaced loudly in the logs instead. DB-touching endpoints will error
+    until the schema is fixed, but ``/wake`` stays up so the frontend can
+    still detect liveness.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "alembic",
+        "upgrade",
+        "head",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        print(stderr.decode(), file=sys.stderr)
+        print("Alembic migration failed -- see stderr above.", file=sys.stderr)
+    else:
+        print(stdout.decode())
 
 
 @asynccontextmanager
@@ -33,34 +64,21 @@ async def lifespan(app: FastAPI):
     Using ``lifespan`` is the modern replacement for the deprecated
     ``@app.on_event("startup")`` and ``@app.on_event("shutdown")`` decorators.
 
-    Raises:
-        RuntimeError: Raised at startup if the Alembic migration fails, which
-            prevents the server from accepting requests against a broken schema.
+    Migrations are kicked off as a background task rather than awaited so the
+    server starts accepting requests immediately -- see ``run_migrations`` for
+    why this matters for the Render cold-start path.
     """
     # --- Startup ---
-    # Apply any pending database migrations before the server accepts requests.
-    # "upgrade head" brings the schema up to the latest migration version.
-    result = subprocess.run(
-        ["alembic", "upgrade", "head"],
-        capture_output=True,
-        text=True,
-    )
-
-    # A non-zero return code means the migration failed.
-    # Print the error output and stop the server rather than continuing
-    # with a potentially broken or outdated database schema.
-    if result.returncode != 0:
-        print(result.stderr, file=sys.stderr)
-        raise RuntimeError("Alembic migration failed -- see stderr above.")
-
-    # Print whatever Alembic reported so it shows up in the server logs.
-    print(result.stdout)
+    # Held on app.state so the task isn't garbage-collected mid-run.
+    app.state.migration_task = asyncio.create_task(run_migrations())
 
     yield  # Server is now running and accepting requests.
 
     # --- Shutdown ---
-    # Nothing to clean up currently. Add teardown logic here if needed
-    # (e.g. closing connection pools, flushing caches).
+    # Stop an in-flight migration so shutdown isn't blocked waiting on it.
+    task = app.state.migration_task
+    if not task.done():
+        task.cancel()
 
 
 # Create the FastAPI application. The title and description appear in the
@@ -97,8 +115,13 @@ app.add_middleware(
 
 # Register the route groups with the application.
 # Each router is a collection of related URL endpoints defined in its own file.
-app.include_router(sets.router)   # handles /sets and /sets/{id}/cards
-app.include_router(cards.router)  # handles /cards/{id}
+app.include_router(sets.router)       # handles /sets and /sets/{id}/cards
+app.include_router(cards.router)      # handles /cards/{id}
+app.include_router(reference.router)  # handles /reference/conditions, /reference/variants, /reference/rarities
+app.include_router(trends.router)     # handles /trends/* (condition multipliers, future analyses)
+app.include_router(collection.router) # handles /collection/* (template, upload, mock, session)
+app.include_router(palette.router)    # handles /palette (color palette for dashboard charts)
+app.include_router(health.router)     # handles /wake (used by the cold-start loader)
 
 
 @app.get("/", include_in_schema=False)

@@ -12,6 +12,7 @@ will raise a clear error if any field is missing or has the wrong type.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel
 
@@ -29,6 +30,10 @@ class SetResponse(BaseModel):
         name: The display name of the set (e.g. "Base Set").
         series: The series the set belongs to (e.g. "Base").
         printed_total: Number of cards officially printed in the set.
+        total_count: Number of cards actually in the database for this set,
+            including secret rares numbered above printed_total. The frontend
+            derives the secret-rare count as total_count - printed_total.
+            Defaults to 0 for sets that have not been ingested yet.
         release_date: The date the set was released. Can be null.
         symbol_url: URL to the set symbol image. Can be null.
         logo_url: URL to the set logo image. Can be null.
@@ -39,10 +44,14 @@ class SetResponse(BaseModel):
     name: str
     series: str
     printed_total: int
+    total_count: int = 0
     release_date: date | None
     symbol_url: str | None
     logo_url: str | None
     created_at: datetime
+    min_price: Decimal | None = None
+    avg_price: Decimal | None = None
+    max_price: Decimal | None = None
 
     # from_attributes=True allows Pydantic to read values from a SQLAlchemy
     # model object directly, rather than requiring a plain dictionary.

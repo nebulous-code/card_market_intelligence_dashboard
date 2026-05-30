@@ -1,0 +1,75 @@
+{
+  "data": {
+    "originalTitle": "Red Cheek Pikachu LP",
+    "sanitizedTitle": "Red Cheek Pikachu LP",
+    "parsed": {
+      "confidence": 0.8,
+      "condition": "Lightly Played",
+      "cardName": "Red Cheek Pikachu",
+      "fieldConfidence": {
+        "condition": 0.85,
+        "cardName": 0.75
+      }
+    },
+    "matches": [
+      {
+        "tcgPlayerId": "147229",
+        "name": "Pikachu (Red Cheeks)",
+        "setName": "Base Set (Shadowless)",
+        "setId": 1663,
+        "cardNumber": "058/102",
+        "rarity": "Common",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 8.211767196655273,
+        "matchReasons": [],
+        "language": "english",
+        "prices": {
+          "market": 58.64,
+          "low": 20,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "186015",
+        "name": "Detective Pikachu",
+        "setName": "Detective Pikachu",
+        "setId": 2409,
+        "cardNumber": "10/18",
+        "rarity": "Rare",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 5.281939506530762,
+        "matchReasons": [],
+        "language": "english",
+        "prices": {
+          "market": 8.31,
+          "low": 2.03,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "123634",
+        "name": "Pikachu - 58/102 (E3 Stamped with Red Cheeks)",
+        "setName": "Miscellaneous Cards & Products",
+        "setId": 2374,
+        "cardNumber": "058/102",
+        "rarity": "Promo",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 4.712505340576172,
+        "matchReasons": [],
+        "language": "english"
+      }
+    ]
+  },
+  "metadata": {
+    "parseTime": "2026-05-02T15:52:51.067Z",
+    "processingTimeMs": 72,
+    "confidence": 0.8,
+    "apiCallsConsumed": 3,
+    "parsingMethod": "regex-pattern-v1"
+  }
+}

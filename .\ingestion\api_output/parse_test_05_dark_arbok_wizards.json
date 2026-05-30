@@ -1,0 +1,83 @@
+{
+  "data": {
+    "originalTitle": "Team Rocket Dark Arbok wizards edition",
+    "sanitizedTitle": "Team Rocket Dark Arbok wizards edition",
+    "parsed": {
+      "confidence": 0.775,
+      "setName": "Team Rocket",
+      "cardName": "Dark Arbok Wizards Edition",
+      "fieldConfidence": {
+        "setName": 0.8,
+        "cardName": 0.75
+      }
+    },
+    "matches": [
+      {
+        "tcgPlayerId": "84565",
+        "name": "Dark Arbok",
+        "setName": "Team Rocket Returns",
+        "setId": 1428,
+        "cardNumber": "29/109",
+        "rarity": "Uncommon",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 6.275714874267578,
+        "matchReasons": [
+          "Set matches \"Team Rocket\""
+        ],
+        "language": "english",
+        "prices": {
+          "market": 4.5,
+          "low": 0.81,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "84575",
+        "name": "Dark Claw",
+        "setName": "Dark Explorers",
+        "setId": 1386,
+        "cardNumber": "92/108",
+        "rarity": "Uncommon",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 5.413700103759766,
+        "matchReasons": [],
+        "language": "english",
+        "prices": {
+          "market": 3.48,
+          "low": 1.7,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "84636",
+        "name": "Dark Patch",
+        "setName": "Dark Explorers",
+        "setId": 1386,
+        "cardNumber": "93/108",
+        "rarity": "Uncommon",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 5.413700103759766,
+        "matchReasons": [],
+        "language": "english",
+        "prices": {
+          "market": 2.34,
+          "low": 0.6,
+          "mid": null,
+          "high": null
+        }
+      }
+    ]
+  },
+  "metadata": {
+    "parseTime": "2026-05-02T15:52:52.026Z",
+    "processingTimeMs": 33,
+    "confidence": 0.775,
+    "apiCallsConsumed": 3,
+    "parsingMethod": "regex-pattern-v1"
+  }
+}

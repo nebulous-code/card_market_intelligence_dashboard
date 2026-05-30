@@ -30,15 +30,22 @@ import os
 import sys
 
 from dotenv import find_dotenv, load_dotenv
+from logging_setup import configure_logging
+
+# Configure logging before loading any local modules so that log lines
+# from pokemonpricetracker.py, watermark.py, and loader.py all go to
+# both the console and ingestion.log.
+configure_logging()
 
 # Load .env before importing any local modules that read env vars at import time.
 load_dotenv(find_dotenv())
 
-from loader import insert_price_snapshots          # noqa: E402
-from pokemonpricetracker import credits_exhausted, fetch_prices  # noqa: E402
-from watermark import get_all_sets, set_watermark  # noqa: E402
-from sqlalchemy import create_engine                # noqa: E402
-from sqlalchemy.orm import Session                  # noqa: E402
+from loader import insert_price_snapshots                                    # noqa: E402
+from pokemonpricetracker import credits_exhausted, fetch_prices              # noqa: E402
+from set_resolver import SOURCE_PPT, SetIdentifierNotFoundError, resolve_identifier  # noqa: E402
+from watermark import get_all_sets, set_watermark                            # noqa: E402
+from sqlalchemy import create_engine                                         # noqa: E402
+from sqlalchemy.orm import Session                                           # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +53,35 @@ log = logging.getLogger(__name__)
 def _bool_env(key: str, default: bool = False) -> bool:
     """Read a boolean environment variable. Accepts 'true'/'false' (case-insensitive)."""
     return os.environ.get(key, str(default)).strip().lower() == "true"
+
+
+def _format_unknowns(unknowns: dict[tuple[str, str], int]) -> str:
+    """
+    Format the unknown variant/condition collector as a copy-pasteable list
+    of INSERT statements plus a row-skipped count. Returns "  (none)" when
+    every raw value PPT sent was recognised.
+    """
+    if not unknowns:
+        return "  (none)"
+
+    table_for_field = {
+        "condition": "condition_aliases",
+        "variant":   "variant_aliases",
+    }
+    lines: list[str] = []
+    # Sort by field then count desc so the most impactful unknowns surface first.
+    for (field, raw), count in sorted(
+        unknowns.items(), key=lambda kv: (kv[0][0], -kv[1])
+    ):
+        table = table_for_field.get(field, f"{field}_aliases")
+        # The raw value is wrapped in $$ ... $$ so it is safe to copy-paste
+        # even if it contains apostrophes.
+        lines.append(
+            f"  [{field}] {raw!r}  ({count} row{'s' if count != 1 else ''} skipped)\n"
+            f"     INSERT INTO {table} (raw_value, canonical_value)\n"
+            f"     VALUES ($${raw}$$, '<choose canonical>');"
+        )
+    return "\n".join(lines)
 
 
 def main() -> None:
@@ -58,10 +94,6 @@ def main() -> None:
       3. For each set, call PokemonPriceTracker and insert price snapshots.
       4. Update the watermark for the set on success.
       5. Stop gracefully if the daily credit limit is running low.
-
-    Sets that have already been backfilled are fetched with current prices
-    only on subsequent runs. Sets that have not yet been backfilled are
-    fetched with full history on the first run (API tier only).
 
     Returns:
         None
@@ -76,6 +108,12 @@ def main() -> None:
     log.info(
         "Starting price ingestion run. include_history=%s history_days=%s include_ebay=%s",
         include_history, history_days, include_ebay,
+    )
+    log.debug(
+        "Raw env values: PPT_INCLUDE_HISTORY=%r PPT_HISTORY_DAYS=%r PPT_INCLUDE_EBAY=%r",
+        os.environ.get("PPT_INCLUDE_HISTORY"),
+        os.environ.get("PPT_HISTORY_DAYS"),
+        os.environ.get("PPT_INCLUDE_EBAY"),
     )
 
     # Open a single session for watermark reads/writes throughout the run.
@@ -93,12 +131,33 @@ def main() -> None:
     sets_completed = 0
     sets_skipped = 0
 
+    # Accumulators for the run-level summary logged at the end.
+    run_total_matched = 0
+    run_total_skipped = 0
+    run_total_errors = 0
+    run_set_lines: list[str] = []      # per-set breakdown lines for the summary
+    run_warning_lines: list[str] = []  # skipped-card detail lines for the summary
+    # Aggregates raw condition/variant strings PPT sent that aren't in the
+    # alias tables. Maps (field, raw_value) -> total skipped-row count across
+    # all sets in the run. Surfaced in the run summary as INSERT snippets.
+    run_unknowns: dict[tuple[str, str], int] = {}
+
     for set_info in sets:
         set_id = set_info["id"]
         set_name = set_info["name"]
         log.info("--- Processing set: %s (%s) ---", set_id, set_name)
 
-        # Check whether this set needs a backfill or just a current-price run.
+        # Resolve the PPT display name through the set_identifiers table.
+        # This fails loudly if the mapping is missing rather than silently
+        # calling the API with a wrong name and getting 0 results.
+        try:
+            ppt_name = resolve_identifier(set_id, SOURCE_PPT)
+        except SetIdentifierNotFoundError as e:
+            log.error("%s", e)
+            sets_skipped += 1
+            continue
+
+        # Check watermark for pagination resume offset.
         with Session(engine) as session:
             watermark = None
             try:
@@ -107,22 +166,16 @@ def main() -> None:
             except Exception:
                 pass  # First run -- no watermark exists yet.
 
-        already_backfilled = watermark.get("backfilled", False) if watermark else False
         start_offset = watermark.get("last_offset", 0) if watermark else 0
         if start_offset > 0:
             log.info("Watermark found for set %s at offset=%d -- resuming.", set_id, start_offset)
 
-        # Determine whether to include history on this run.
-        # On the API tier (include_history=True), pull history on the first run
-        # per set. On subsequent runs, history accumulates from daily snapshots.
-        run_with_history = include_history and not already_backfilled
+        run_with_history = include_history
         run_with_ebay = include_ebay
 
         try:
-            # Pass the display name to PokemonPriceTracker -- it does not
-            # recognise TCGdex IDs. The set_id is kept for watermark tracking.
             ppt_cards, credits_remaining, next_offset = fetch_prices(
-                set_name=set_name,
+                set_name=ppt_name,
                 start_offset=start_offset,
                 include_history=run_with_history,
                 history_days=history_days,
@@ -140,22 +193,48 @@ def main() -> None:
 
         # Write price snapshots for this set.
         try:
-            inserted = insert_price_snapshots(ppt_cards, set_id)
-            log.info("Inserted %d snapshots for set %s.", inserted, set_id)
+            stats = insert_price_snapshots(ppt_cards, set_id)
         except Exception as e:
             log.error("Failed to insert snapshots for set %s: %s. Skipping watermark.", set_id, e)
             sets_skipped += 1
             continue
 
-        # Update the watermark with the next offset.
-        # next_offset=0 means the full set completed; any other value means
-        # the run was interrupted and the next run should resume from there.
+        # Log the per-set summary block.
+        skipped_detail = ", ".join(
+            f"{cid} ({name})" for cid, name, _ in stats["skipped_cards"]
+        ) or "none"
+        sep = "─" * 45
+        log.info(
+            "\n%s\n%s ingestion complete\n"
+            "  PPT cards returned : %d\n"
+            "  Matched            : %d\n"
+            "  Skipped            : %d\n"
+            "  Errors             : %d\n"
+            "  Skipped cards      : %s\n%s",
+            sep, set_name,
+            stats["ppt_total"], stats["matched"], stats["skipped"], stats["errors"],
+            skipped_detail, sep,
+        )
+
+        # Accumulate into run-level totals.
+        run_total_matched += stats["matched"]
+        run_total_skipped += stats["skipped"]
+        run_total_errors  += stats["errors"]
+        run_set_lines.append(
+            f"  {set_name:<12} {stats['matched']}/{stats['ppt_total']} matched, {stats['skipped']} skipped"
+        )
+        for cid, name, reason in stats["skipped_cards"]:
+            run_warning_lines.append(f"  [{set_id}] {cid} ({name}) — {reason}")
+
+        # Merge per-set unknown variant/condition counts into the run total.
+        for key, count in (stats.get("unknowns") or {}).items():
+            run_unknowns[key] = run_unknowns.get(key, 0) + count
+
         with Session(engine) as session:
             with session.begin():
                 set_watermark(
                     session,
                     set_id,
-                    backfilled=run_with_history,
                     last_offset=next_offset,
                 )
         if next_offset == 0:
@@ -174,10 +253,45 @@ def main() -> None:
             )
             break
 
-    log.info(
-        "Price ingestion run complete. sets_completed=%d sets_skipped=%d",
-        sets_completed, sets_skipped,
+    # --- Run-level summary ---
+    from datetime import date as _date
+    run_date = _date.today().isoformat()
+
+    if run_total_errors > 0:
+        overall_status = "❌ Failed"
+    elif run_total_skipped > 0:
+        overall_status = "⚠️ Warnings"
+    else:
+        overall_status = "✅ Success"
+
+    warnings_section = "\n".join(run_warning_lines) if run_warning_lines else "  (none)"
+    per_set_section = "\n".join(run_set_lines) if run_set_lines else "  (no sets processed)"
+    unknowns_section = _format_unknowns(run_unknowns)
+
+    sep = "═" * 45
+    summary = (
+        f"\n{sep}\n"
+        f"Nightly ingestion complete — {run_date}\n"
+        f"  Sets processed : {sets_completed}\n"
+        f"  Total matched  : {run_total_matched}\n"
+        f"  Total skipped  : {run_total_skipped}\n"
+        f"  Total errors   : {run_total_errors}\n"
+        f"  Overall status : {overall_status}\n"
+        f"\nPer-set breakdown:\n{per_set_section}\n"
+        f"\nWarnings:\n{warnings_section}\n"
+        f"\nUnrecognized values (rows skipped, add aliases to capture):\n{unknowns_section}\n"
+        f"{sep}"
     )
+    log.info("%s", summary)
+
+    # Write summary variables to GitHub Actions environment file when running
+    # in CI. This is a no-op locally because GITHUB_ENV is not set there.
+    github_env = os.environ.get("GITHUB_ENV")
+    if github_env:
+        with open(github_env, "a", encoding="utf-8") as f:
+            f.write(f"RUN_DATE={run_date}\n")
+            f.write(f"RUN_STATUS={overall_status}\n")
+            f.write(f"EMAIL_BODY<<EOF\n{summary}\nEOF\n")
 
 
 if __name__ == "__main__":

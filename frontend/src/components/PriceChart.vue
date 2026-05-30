@@ -44,6 +44,7 @@ import {
 } from "chart.js";
 import { computed } from "vue";
 import { Bar } from "vue-chartjs";
+import { formatCurrency } from "../utils/formatters.js";
 
 // Register all the Chart.js components this chart needs.
 // Chart.js uses tree-shaking so only the pieces you explicitly register
@@ -85,7 +86,9 @@ const chartData = computed(() => {
   const counts = {};
 
   for (const card of props.cards) {
-    const rarity = card.rarity ?? "Unknown";
+    // Use the human-readable label from the API for grouping/display so the
+    // chart shows "Common" rather than the canonical "common".
+    const rarity = card.rarity_label ?? card.rarity ?? "Unknown";
     const prices = props.pricesByCardId[card.id] ?? [];
 
     // Use NM (Near Mint) — the condition label used by PokemonPriceTracker
@@ -126,16 +129,14 @@ const chartOptions = {
     legend: { display: false }, // The single dataset label is redundant.
     tooltip: {
       callbacks: {
-        // Format tooltip values as dollar amounts.
-        label: (ctx) => ` $${ctx.parsed.y}`,
+        label: (ctx) => ` ${formatCurrency(ctx.parsed.y)}`,
       },
     },
   },
   scales: {
     y: {
       ticks: {
-        // Format Y axis tick labels as dollar amounts.
-        callback: (val) => `$${val}`,
+        callback: (val) => formatCurrency(val),
       },
     },
   },

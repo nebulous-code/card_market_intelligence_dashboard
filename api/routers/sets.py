@@ -7,12 +7,16 @@ type annotations to automatically validate inputs, serialize outputs, and
 generate the interactive documentation at /docs.
 """
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models.set import Set
 from models.card import Card, PriceSnapshot
+from routers.cards import _label_maps, _rarity_labels, _to_card_response, _to_snapshot_response
 from schemas.card import CardResponse, PriceSnapshotResponse, SetCardPricesResponse
 from schemas.set import SetResponse
 
@@ -39,10 +43,53 @@ def list_sets(db: Session = Depends(get_db)):
         list[SetResponse]: A list of all sets. Returns an empty list if no
             sets have been ingested yet.
     """
-    # Query all sets and sort them newest first.
-    # nulls_last() ensures sets without a release date sort to the bottom
-    # rather than the top, which is PostgreSQL's default for DESC ordering.
-    return db.query(Set).order_by(Set.release_date.desc().nulls_last()).all()
+    # Compute min/avg/max market price per set from latest snapshots.
+    # We join price_snapshots through cards and aggregate per set_id.
+    price_stats = (
+        db.query(
+            Card.set_id,
+            func.min(PriceSnapshot.market_price).label("min_price"),
+            func.avg(PriceSnapshot.market_price).label("avg_price"),
+            func.max(PriceSnapshot.market_price).label("max_price"),
+        )
+        .join(PriceSnapshot, PriceSnapshot.card_id == Card.id)
+        .filter(PriceSnapshot.market_price.isnot(None))
+        .group_by(Card.set_id)
+        .all()
+    )
+    stats_by_set = {row.set_id: row for row in price_stats}
+
+    # Total card count per set (including secret rares numbered above
+    # printed_total). The frontend uses this to render the "Secret Rares"
+    # KPI in the set header and the "+N secret" badge on set list cards.
+    card_counts = (
+        db.query(Card.set_id, func.count(Card.id).label("total_count"))
+        .group_by(Card.set_id)
+        .all()
+    )
+    count_by_set = {row.set_id: row.total_count for row in card_counts}
+
+    sets = db.query(Set).order_by(Set.release_date.desc().nulls_last()).all()
+    result = []
+    for s in sets:
+        stats = stats_by_set.get(s.id)
+        result.append(
+            SetResponse(
+                id=s.id,
+                name=s.name,
+                series=s.series,
+                printed_total=s.printed_total,
+                total_count=count_by_set.get(s.id, 0),
+                release_date=s.release_date,
+                symbol_url=s.symbol_url,
+                logo_url=s.logo_url,
+                created_at=s.created_at,
+                min_price=Decimal(str(stats.min_price)) if stats and stats.min_price is not None else None,
+                avg_price=Decimal(str(stats.avg_price)) if stats and stats.avg_price is not None else None,
+                max_price=Decimal(str(stats.max_price)) if stats and stats.max_price is not None else None,
+            )
+        )
+    return result
 
 
 @router.get("/{set_id}", response_model=SetResponse)
@@ -68,7 +115,21 @@ def get_set(set_id: str, db: Session = Depends(get_db)):
     if record is None:
         raise HTTPException(status_code=404, detail=f"Set '{set_id}' not found")
 
-    return record
+    total_count = (
+        db.query(func.count(Card.id)).filter(Card.set_id == set_id).scalar() or 0
+    )
+
+    return SetResponse(
+        id=record.id,
+        name=record.name,
+        series=record.series,
+        printed_total=record.printed_total,
+        total_count=total_count,
+        release_date=record.release_date,
+        symbol_url=record.symbol_url,
+        logo_url=record.logo_url,
+        created_at=record.created_at,
+    )
 
 
 @router.get("/{set_id}/cards", response_model=list[CardResponse])
@@ -105,7 +166,8 @@ def list_cards_for_set(set_id: str, db: Session = Depends(get_db)):
         .order_by(Card.number)
         .all()
     )
-    return cards
+    rarity_labels = _rarity_labels(db)
+    return [_to_card_response(c, rarity_labels) for c in cards]
 
 
 @router.get("/{set_id}/cards/prices", response_model=SetCardPricesResponse)
@@ -136,30 +198,40 @@ def get_prices_for_set(set_id: str, db: Session = Depends(get_db)):
     if set_record is None:
         raise HTTPException(status_code=404, detail=f"Set '{set_id}' not found")
 
-    # Fetch all snapshots for the set in one query, ordered newest-first so
-    # the deduplication loop below always sees the most recent row first.
+    # Fetch only the latest snapshot per (card_id, condition, variant) using
+    # PostgreSQL's DISTINCT ON. This collapses hundreds of thousands of
+    # historic rows into a few thousand at the database layer rather than
+    # pulling everything to the API process and deduping in Python (which
+    # caused the endpoint to time out on sets with long price histories).
+    #
+    # DISTINCT ON requires the leading ORDER BY columns to match its column
+    # list; the trailing captured_at DESC picks the newest row per group.
     snapshots = (
         db.query(PriceSnapshot)
         .join(Card, PriceSnapshot.card_id == Card.id)
         .filter(Card.set_id == set_id)
-        .order_by(PriceSnapshot.card_id, PriceSnapshot.captured_at.desc())
+        .distinct(
+            PriceSnapshot.card_id,
+            PriceSnapshot.condition,
+            PriceSnapshot.variant,
+        )
+        .order_by(
+            PriceSnapshot.card_id,
+            PriceSnapshot.condition,
+            PriceSnapshot.variant,
+            PriceSnapshot.captured_at.desc(),
+        )
         .all()
     )
 
-    # Deduplicate: keep only the latest snapshot per (card_id, condition).
-    seen: dict[str, set[str]] = {}
     prices: dict[str, list] = {}
     for snap in snapshots:
-        cid = snap.card_id
-        if cid not in seen:
-            seen[cid] = set()
-        if snap.condition not in seen[cid]:
-            seen[cid].add(snap.condition)
-            prices.setdefault(cid, []).append(snap)
+        prices.setdefault(snap.card_id, []).append(snap)
 
+    cond_labels, variant_labels = _label_maps(db)
     return SetCardPricesResponse(
         prices={
-            cid: [PriceSnapshotResponse.model_validate(s) for s in snaps]
+            cid: [_to_snapshot_response(s, cond_labels, variant_labels) for s in snaps]
             for cid, snaps in prices.items()
         }
     )

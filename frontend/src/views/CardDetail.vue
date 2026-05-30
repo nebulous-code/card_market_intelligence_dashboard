@@ -1,14 +1,20 @@
 <template>
   <v-container class="py-6">
 
-    <!-- Back button -->
+    <!--
+      Back button. Default destination is the parent set. When the user
+      arrived from the Collection Dashboard (?from=collection), route
+      back to the dashboard instead so they don't lose context. The
+      breadcrumb trail above still points at the set, since that's the
+      logical parent of the card.
+    -->
     <v-btn
-      :to="'/'"
+      :to="backDestination"
       variant="text"
       prepend-icon="mdi-arrow-left"
       class="mb-4"
     >
-      Back to Dashboard
+      {{ backLabel }}
     </v-btn>
 
     <!-- Loading state -->
@@ -38,36 +44,34 @@
         <v-col>
           <div class="text-h4 font-weight-bold mb-1">{{ card.name }}</div>
           <div class="text-subtitle-1 text-medium-emphasis mb-4">
-            {{ card.set_id }} &bull; #{{ card.number }}
+            {{ card.set_display_name ?? card.set_id }} &bull; #{{ card.number }}/{{ card.set_printed_total ?? '?' }}
           </div>
           <v-chip v-if="card.supertype" class="mr-2" color="primary" variant="tonal">
             {{ card.supertype }}
           </v-chip>
           <v-chip v-if="card.rarity" variant="tonal">
-            {{ card.rarity }}
+            {{ card.rarity_label ?? card.rarity }}
           </v-chip>
         </v-col>
       </v-row>
 
-      <!-- Source / condition filters -->
+      <!-- Condition / variant filters -->
       <v-row class="mb-4" dense>
-        <v-col cols="12" sm="4">
+        <v-col cols="12" sm="6">
           <v-select
-            v-model="selectedSource"
-            :items="availableSources"
-            label="Source"
-            clearable
+            v-model="selectedCondition"
+            :items="availableConditions"
+            label="Condition"
             density="compact"
             hide-details
             @update:modelValue="fetchHistory"
           />
         </v-col>
-        <v-col cols="12" sm="4">
+        <v-col cols="12" sm="6">
           <v-select
-            v-model="selectedCondition"
-            :items="availableConditions"
-            label="Condition"
-            clearable
+            v-model="selectedVariant"
+            :items="availableVariants"
+            label="Variant"
             density="compact"
             hide-details
             @update:modelValue="fetchHistory"
@@ -106,15 +110,21 @@
           :sort-by="[{ key: 'captured_at', order: 'desc' }]"
           density="compact"
         >
-          <!-- Format market price as dollars -->
           <template #item.market_price="{ item }">
-            <span v-if="item.market_price != null">
-              ${{ Number(item.market_price).toFixed(2) }}
+            <span :class="item.market_price == null ? 'text-medium-emphasis' : ''">
+              {{ formatCurrency(item.market_price) }}
             </span>
-            <span v-else class="text-medium-emphasis">---</span>
           </template>
           <template #item.captured_date="{ item }">
-            {{ item.captured_date }}
+            {{ formatDate(item.captured_date) }}
+          </template>
+          <template #item.variant="{ item }">
+            <span :class="item.variant == null ? 'text-medium-emphasis' : ''">
+              {{ item.variant_label }}
+            </span>
+          </template>
+          <template #item.condition="{ item }">
+            {{ item.condition_label }}
           </template>
         </v-data-table>
       </v-card>
@@ -147,10 +157,16 @@ import {
   Title,
   Tooltip,
 } from "chart.js";
-import { computed, onMounted, ref } from "vue";
+import { computed, inject, onMounted, onUnmounted, ref } from "vue";
 import { Line } from "vue-chartjs";
 import { useRoute } from "vue-router";
-import { getCard, getPriceHistory } from "../api/index.js";
+import {
+  getCard,
+  getPriceHistory,
+  getReferenceConditions,
+  getReferenceVariants,
+} from "../api/index.js";
+import { formatCurrency, formatDate } from "../utils/formatters.js";
 
 // Register Chart.js components needed for a line chart.
 ChartJS.register(Title, Tooltip, Legend, LineElement, PointElement, CategoryScale, LinearScale);
@@ -158,30 +174,86 @@ ChartJS.register(Title, Tooltip, Legend, LineElement, PointElement, CategoryScal
 const route = useRoute();
 const cardId = route.params.cardId;
 
+// Back-button destination depends on where the user came from. Routes
+// inside the app pass ?from=collection when linking from the Collection
+// Dashboard so the back button cycles back there instead of dumping the
+// user on a set page they didn't visit.
+const fromCollection = computed(() => route.query.from === "collection");
+const backDestination = computed(() => {
+  if (fromCollection.value) return "/collection/dashboard";
+  return card.value ? `/sets/${card.value.set_id}` : "/sets";
+});
+const backLabel = computed(() => {
+  if (fromCollection.value) return "Dashboard";
+  return card.value
+    ? card.value.set_display_name ?? card.value.set_id
+    : "Sets";
+});
+
+const setCrumb = inject('setCrumb', () => {})
+const clearCrumbs = inject('clearCrumbs', () => {})
+
 // --- State ---
 const card = ref(null);
+// allSnapshots is the unfiltered set, fetched once on mount. It powers the
+// dropdown option lists so they stay populated even when a filter narrows
+// the visible snapshots down to a single condition/variant.
+const allSnapshots = ref([]);
 const snapshots = ref([]);
+// Canonical reference data fetched once per page load. Drives display labels
+// and the order options appear in the dropdowns.
+const referenceConditions = ref([]);
+const referenceVariants = ref([]);
 const loading = ref(true);     // true while the initial card metadata is loading
 const historyLoading = ref(false); // true while price history is loading
 const error = ref(null);
 
 // Filter state — bound to the dropdowns.
-const selectedSource = ref(null);
 const selectedCondition = ref(null);
+const selectedVariant = ref(null);
 
 // --- Derived filter options ---
-// Build the source/condition dropdown options from whatever the API returns,
-// rather than hardcoding them, so new sources/conditions appear automatically.
-
-const availableSources = computed(() => {
-  const sources = new Set(snapshots.value.map((s) => s.source));
-  return Array.from(sources).sort();
-});
+// Show only the canonical values that this specific card actually has data
+// for, ordered and labeled per the canonical reference data so the dropdowns
+// match what the rest of the UI uses.
 
 const availableConditions = computed(() => {
-  const conditions = new Set(snapshots.value.map((s) => s.condition));
-  return Array.from(conditions).sort();
+  const present = new Set(allSnapshots.value.map((s) => s.condition));
+  return referenceConditions.value
+    .filter((r) => present.has(r.value))
+    .map((r) => ({ title: r.label, value: r.value }));
 });
+
+// Variant options. The "Standard" canonical row has value=null; the API
+// recognises the "__none__" sentinel as a request to filter for variant IS NULL.
+const availableVariants = computed(() => {
+  const present = new Set(allSnapshots.value.map((s) => s.variant));
+  return referenceVariants.value
+    .filter((r) => present.has(r.value))
+    .map((r) => ({ title: r.label, value: r.value ?? "__none__" }));
+});
+
+/**
+ * Pick a sensible default variant: prefer any printing that isn't a
+ * 1st-edition (which collectors typically treat as a separate market).
+ * Falls back to whatever variant exists if every option is 1st-edition.
+ */
+function pickDefaultVariant(snaps) {
+  const variants = Array.from(new Set(snaps.map((s) => s.variant)));
+  if (variants.length === 0) return null;
+  const nonFirstEd = variants.filter(
+    (v) => v != null && !String(v).includes("1st_edition")
+  );
+  if (nonFirstEd.length > 0) {
+    nonFirstEd.sort();
+    return nonFirstEd[0];
+  }
+  // No non-1st-edition printing exists. Prefer null (Standard) if present,
+  // otherwise fall back to the first variant alphabetically.
+  if (variants.includes(null)) return "__none__";
+  variants.sort((a, b) => String(a).localeCompare(String(b)));
+  return variants[0];
+}
 
 // --- Data fetching ---
 
@@ -189,8 +261,12 @@ async function fetchHistory() {
   historyLoading.value = true;
   try {
     const filters = {};
-    if (selectedSource.value) filters.source = selectedSource.value;
     if (selectedCondition.value) filters.condition = selectedCondition.value;
+    // "__none__" is the sentinel the API recognises as "filter for NULL variant"
+    // (cards with no printing distinction, e.g. modern non-holos).
+    if (selectedVariant.value) {
+      filters.variant = selectedVariant.value;
+    }
 
     const result = await getPriceHistory(cardId, filters);
     snapshots.value = result.snapshots ?? [];
@@ -205,17 +281,43 @@ async function fetchHistory() {
 
 onMounted(async () => {
   try {
-    // Fetch card metadata and initial price history in parallel.
-    const [cardData] = await Promise.all([
+    // Fetch the unfiltered history + canonical reference data in parallel.
+    // The reference lists drive the dropdown labels; allSnapshots filters them
+    // down to options actually present for this card.
+    const [cardData, allResult, refConditions, refVariants] = await Promise.all([
       getCard(cardId),
-      fetchHistory(),
+      getPriceHistory(cardId, {}),
+      getReferenceConditions(),
+      getReferenceVariants(),
     ]);
+    allSnapshots.value = allResult.snapshots ?? [];
+    referenceConditions.value = refConditions ?? [];
+    referenceVariants.value = refVariants ?? [];
+
+    // Default the filters to NM + a non-1st-edition variant when those exist.
+    if (allSnapshots.value.some((s) => s.condition === "NM")) {
+      selectedCondition.value = "NM";
+    }
+    selectedVariant.value = pickDefaultVariant(allSnapshots.value);
+
+    await fetchHistory();
+
     card.value = cardData;
+    // Set breadcrumbs: Sets > {Set Name} (linked) > {Card Name} {num}/{total} (plain)
+    const setId = cardData.set_id;
+    const setName = cardData.set_display_name ?? setId;
+    const cardLabel = `${cardData.name} ${cardData.number}/${cardData.set_printed_total ?? '?'}`;
+    setCrumb(1, setName, `/sets/${setId}`);
+    setCrumb(2, cardLabel, null);
   } catch (e) {
     error.value = `Failed to load card: ${e.message}`;
   } finally {
     loading.value = false;
   }
+});
+
+onUnmounted(() => {
+  clearCrumbs();
 });
 
 // --- Chart ---
@@ -257,14 +359,14 @@ const chartOptions = {
     legend: { display: false },
     tooltip: {
       callbacks: {
-        label: (ctx) => ` $${Number(ctx.parsed.y).toFixed(2)}`,
+        label: (ctx) => ` ${formatCurrency(ctx.parsed.y)}`,
       },
     },
   },
   scales: {
     y: {
       ticks: {
-        callback: (val) => `$${val}`,
+        callback: (val) => formatCurrency(val),
       },
     },
     x: {
@@ -282,6 +384,7 @@ const snapshotHeaders = [
   { title: "Date", key: "captured_date" },
   { title: "Source", key: "source" },
   { title: "Condition", key: "condition" },
+  { title: "Variant", key: "variant" },
   { title: "Market Price", key: "market_price", align: "end" },
 ];
 </script>

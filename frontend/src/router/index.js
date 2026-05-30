@@ -1,36 +1,110 @@
-/**
- * Vue Router configuration.
- *
- * This file defines the URL routes for the application -- which component
- * should be displayed when a user navigates to a given URL.
- *
- * Routes:
- *   /               -- Dashboard: set selector, card table, price chart
- *   /cards/:cardId  -- Card detail: price history chart and snapshot table
- */
-
 import { createRouter, createWebHistory } from "vue-router";
 import CardDetail from "../views/CardDetail.vue";
-import Dashboard from "../views/Dashboard.vue";
+import CollectionDashboardView from "../views/CollectionDashboardView.vue";
+import CollectionView from "../views/CollectionView.vue";
+import DebugLoaderView from "../views/DebugLoaderView.vue";
+import PrivacyView from "../views/PrivacyView.vue";
+import SetDetailView from "../views/SetDetailView.vue";
+import SetListView from "../views/SetListView.vue";
+import TrendsView from "../views/TrendsView.vue";
+import ConditionMultiplierHeatmap from "../views/trends/ConditionMultiplierHeatmap.vue";
 
-// Define the routes. Each object maps a URL path to a component.
 const routes = [
   {
-    // The root path "/" shows the main dashboard view.
     path: "/",
-    component: Dashboard,
+    redirect: "/sets",
   },
   {
-    // Card detail page. :cardId is a dynamic segment -- Vue Router makes it
-    // available inside the component as route.params.cardId.
+    path: "/sets",
+    component: SetListView,
+    meta: {
+      breadcrumbs: [
+        { title: "Sets" },
+      ],
+    },
+  },
+  {
+    path: "/sets/:setId",
+    component: SetDetailView,
+    meta: {
+      breadcrumbs: [
+        { title: "Sets", to: "/sets" },
+        { title: ":setId" }, // replaced dynamically by the view
+      ],
+    },
+  },
+  {
     path: "/cards/:cardId",
     component: CardDetail,
+    meta: {
+      breadcrumbs: [
+        { title: "Sets", to: "/sets" },
+        { title: ":setId", to: "/sets/:setId" }, // replaced dynamically
+        { title: ":cardId" },                     // replaced dynamically
+      ],
+    },
+  },
+  {
+    path: "/trends",
+    component: TrendsView,
+    meta: {
+      breadcrumbs: [
+        { title: "Sets", to: "/sets" },
+        { title: "Market Trends" },
+      ],
+    },
+  },
+  {
+    path: "/trends/condition-multipliers",
+    component: ConditionMultiplierHeatmap,
+    meta: {
+      breadcrumbs: [
+        { title: "Sets", to: "/sets" },
+        { title: "Market Trends", to: "/trends" },
+        { title: "Condition Multipliers" },
+      ],
+    },
+  },
+  {
+    path: "/collection",
+    component: CollectionView,
+    meta: {
+      breadcrumbs: [
+        { title: "Analyze Your Collection" },
+      ],
+    },
+  },
+  {
+    path: "/collection/dashboard",
+    component: CollectionDashboardView,
+    meta: {
+      breadcrumbs: [
+        { title: "Analyze Your Collection", to: "/collection" },
+        { title: "Dashboard" },
+      ],
+    },
+  },
+  {
+    path: "/privacy",
+    component: PrivacyView,
+    meta: {
+      breadcrumbs: [
+        { title: "Privacy Policy" },
+      ],
+    },
+  },
+  {
+    // Debug harness for the cold-start loader. Not linked from the nav --
+    // discoverable via URL only. Mounts ColdStartLoader in debug mode so
+    // polling and the error timeout are suppressed.
+    path: "/debug/loader",
+    component: DebugLoaderView,
+    meta: {
+      breadcrumbs: [{ title: "Debug" }, { title: "Loader" }],
+    },
   },
 ];
 
-// Create the router using HTML5 history mode.
-// createWebHistory() means URLs look like "/dashboard" rather than the
-// hash-based "/#/dashboard" format used in older Vue applications.
 export default createRouter({
   history: createWebHistory(),
   routes,

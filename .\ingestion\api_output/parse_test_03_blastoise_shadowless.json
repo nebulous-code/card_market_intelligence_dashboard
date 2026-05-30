@@ -1,0 +1,93 @@
+{
+  "data": {
+    "originalTitle": "Blastoise Base Set Shadowless NM",
+    "sanitizedTitle": "Blastoise Base Set Shadowless NM",
+    "parsed": {
+      "confidence": 0.825,
+      "edition": "Shadowless",
+      "condition": "Near Mint",
+      "setName": "Base Set",
+      "cardName": "Blastoise",
+      "fieldConfidence": {
+        "edition": 0.9,
+        "condition": 0.85,
+        "setName": 0.8,
+        "cardName": 0.75
+      }
+    },
+    "matches": [
+      {
+        "tcgPlayerId": "106997",
+        "name": "Blastoise",
+        "setName": "Base Set (Shadowless)",
+        "setId": 1663,
+        "cardNumber": "002/102",
+        "rarity": "Holo Rare",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 3.7288763523101807,
+        "matchReasons": [
+          "Name matches \"Blastoise\"",
+          "Set matches \"Base Set\""
+        ],
+        "language": "english",
+        "prices": {
+          "market": 1300,
+          "low": 234.99,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "83897",
+        "name": "Blastoise",
+        "setName": "Plasma Storm",
+        "setId": 1413,
+        "cardNumber": "137/135",
+        "rarity": "Secret Rare",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 3.7288763523101807,
+        "matchReasons": [
+          "Name matches \"Blastoise\""
+        ],
+        "language": "english",
+        "prices": {
+          "market": 468.73,
+          "low": 320,
+          "mid": null,
+          "high": null
+        }
+      },
+      {
+        "tcgPlayerId": "42360",
+        "name": "Blastoise",
+        "setName": "Base Set",
+        "setId": 604,
+        "cardNumber": "002/102",
+        "rarity": "Holo Rare",
+        "artist": null,
+        "cardType": null,
+        "matchScore": 3.7288763523101807,
+        "matchReasons": [
+          "Name matches \"Blastoise\"",
+          "Set matches \"Base Set\""
+        ],
+        "language": "english",
+        "prices": {
+          "market": 206.42,
+          "low": 48.02,
+          "mid": null,
+          "high": null
+        }
+      }
+    ]
+  },
+  "metadata": {
+    "parseTime": "2026-05-02T15:52:51.389Z",
+    "processingTimeMs": 19,
+    "confidence": 0.825,
+    "apiCallsConsumed": 3,
+    "parsingMethod": "regex-pattern-v1"
+  }
+}

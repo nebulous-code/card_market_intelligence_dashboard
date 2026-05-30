@@ -11,13 +11,20 @@
 # The API server must have been started at least once before running this
 # script so that Alembic has created the database tables.
 #
-# Usage: ./run_ingest.sh base1
+# Usage:
+#   ./run_ingest.sh base1           # existing set (must be in set_identifiers)
+#   ./run_ingest.sh base2 --new-set # first-time ingest, bypasses resolver
 
 # Exit immediately if no set ID was provided, with a helpful usage message.
 if [ -z "$1" ]; then
-    echo "Usage: ./run_ingest.sh <set-id>"
+    echo "Usage: ./run_ingest.sh <set-id> [--new-set]"
     echo "Example: ./run_ingest.sh base1"
+    echo "         ./run_ingest.sh base2 --new-set"
     exit 1
 fi
 
-uv run python run_ingest.py --set-id "$1"
+if [ "$2" = "--new-set" ]; then
+    uv run python run_ingest.py --set-id "$1" --new-set
+else
+    uv run python run_ingest.py --set-id "$1"
+fi
