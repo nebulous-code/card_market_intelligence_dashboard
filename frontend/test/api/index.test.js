@@ -148,10 +148,10 @@ describe("trends helpers", () => {
 });
 
 describe("getHealth", () => {
-  it("GETs /health", async () => {
+  it("GETs /wake", async () => {
     httpGet.mockResolvedValue({ data: { status: "ok" } });
     const result = await getHealth();
-    expect(httpGet).toHaveBeenCalledWith("/health");
+    expect(httpGet).toHaveBeenCalledWith("/wake");
     expect(result).toEqual({ status: "ok" });
   });
 });
