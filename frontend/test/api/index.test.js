@@ -29,6 +29,7 @@ import {
   getConditionMultipliers,
   getHealth,
   downloadCollectionTemplate,
+  downloadCollectionExcel,
   uploadCollection,
   downloadAnnotatedWorkbook,
   useMockCollection,
@@ -163,6 +164,19 @@ describe("downloadCollectionTemplate", () => {
     const result = await downloadCollectionTemplate();
     expect(httpGet).toHaveBeenCalledWith(
       "/collection/template",
+      { responseType: "blob" },
+    );
+    expect(result).toBe(blob);
+  });
+});
+
+describe("downloadCollectionExcel", () => {
+  it("GETs /collection/excel as a blob and unwraps data", async () => {
+    const blob = new Blob(["xlsx-bytes"]);
+    httpGet.mockResolvedValue({ data: blob });
+    const result = await downloadCollectionExcel();
+    expect(httpGet).toHaveBeenCalledWith(
+      "/collection/excel",
       { responseType: "blob" },
     );
     expect(result).toBe(blob);

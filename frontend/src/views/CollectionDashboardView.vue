@@ -97,7 +97,6 @@
  * survives reloads.
  */
 
-import axios from 'axios'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CollectionKpis from '../components/collection/CollectionKpis.vue'
@@ -111,6 +110,7 @@ import CollectionValuePie from '../components/collection/CollectionValuePie.vue'
 import CollectionVariantBars from '../components/collection/CollectionVariantBars.vue'
 import {
   deleteCollectionSession,
+  downloadCollectionExcel,
   getCollectionCardsWithPrices,
   getPalette,
 } from '../api/index.js'
@@ -184,21 +184,14 @@ async function onResetCollection() {
   router.push('/collection')
 }
 
-const apiBaseUrl =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
-
 async function onDownloadExcel() {
-  // Use a HEAD-style fetch via axios to surface auth / availability
-  // failures as toasts instead of opening a broken Save dialog. The
-  // actual download is initiated by navigating to the endpoint URL so
-  // the browser uses the response's Content-Disposition filename.
+  // Fetch via the shared http instance so the session cookie + CORS
+  // config behave identically to every other dashboard request. Errors
+  // are surfaced as toasts rather than a broken Save dialog.
   downloadingExcel.value = true
   try {
-    const response = await axios.get(`${apiBaseUrl}/collection/excel`, {
-      withCredentials: true,
-      responseType: 'blob',
-    })
-    triggerBlobDownload(response.data, 'collection.xlsx')
+    const blob = await downloadCollectionExcel()
+    triggerBlobDownload(blob, 'collection.xlsx')
   } catch (err) {
     excelToastMessage.value =
       err?.response?.status === 404
