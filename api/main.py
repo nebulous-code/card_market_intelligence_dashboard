@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import cards, collection, health, palette, reference, sets, trends
 
 
-async def run_migrations(app: FastAPI) -> None:
+async def run_migrations() -> None:
     """Apply pending Alembic migrations without blocking app startup.
 
     Runs as a background task so the event loop serves requests -- notably
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     """
     # --- Startup ---
     # Held on app.state so the task isn't garbage-collected mid-run.
-    app.state.migration_task = asyncio.create_task(run_migrations(app))
+    app.state.migration_task = asyncio.create_task(run_migrations())
 
     yield  # Server is now running and accepting requests.
 
