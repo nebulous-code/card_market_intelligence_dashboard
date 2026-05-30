@@ -8,8 +8,8 @@ mysterious failures elsewhere in the suite.
 """
 
 
-def test_health_endpoint(client):
-    response = client.get("/health")
+def test_wake_endpoint(client):
+    response = client.get("/wake")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 

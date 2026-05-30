@@ -5,7 +5,7 @@
 
   <!--
     Cold-start loader. Mounted on top of AppLayout (z-index 9999) only when
-    the silent /health probe in onMounted didn't return in time. Vue's
+    the silent /wake probe in onMounted didn't return in time. Vue's
     <Transition> handles the fade-out when the API responds.
   -->
   <Transition name="fade">
@@ -36,9 +36,9 @@ provide('clearCrumbs', () => {
 // --- Cold-start loader orchestration ---
 //
 // Render's free tier spins the API down after ~15 minutes of inactivity. We
-// fire a single /health probe with an 800ms cap. If it succeeds in time the
+// fire a single /wake probe with an 800ms cap. If it succeeds in time the
 // loader never paints (warm refresh). If it doesn't, we surface ColdStartLoader
-// which polls every 3s and emits 'loaded' once /health responds; the overlay
+// which polls every 3s and emits 'loaded' once /wake responds; the overlay
 // then fades and the underlying AppLayout is already mounted so the in-view
 // skeletons handle the data-arriving phase.
 const GRACE_MS = 800

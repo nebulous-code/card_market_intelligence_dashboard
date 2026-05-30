@@ -185,14 +185,19 @@ export async function getConditionMultipliers(setId, groupingType) {
 }
 
 /**
- * Lightweight liveness probe. Hits /health, which is intentionally DB-free
+ * Lightweight liveness probe. Hits /wake, which is intentionally DB-free
  * so a cold database does not block detection. Used by the cold-start loader
  * to know when the API service has woken up.
+ *
+ * The path is /wake (not /health) because ad-blocker filter lists routinely
+ * block well-known liveness paths on shared hosts -- uBlock Origin's default
+ * lists block /health on *.onrender.com, which made cold-start detection
+ * fail silently for users with ad blockers.
  *
  * @returns {Promise<{status: string}>}
  */
 export async function getHealth() {
-  const { data } = await http.get("/health");
+  const { data } = await http.get("/wake");
   return data;
 }
 

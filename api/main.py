@@ -27,7 +27,7 @@ async def run_migrations() -> None:
     """Apply pending Alembic migrations without blocking app startup.
 
     Runs as a background task so the event loop serves requests -- notably
-    the DB-free ``/health`` probe -- the instant uvicorn is up, instead of
+    the DB-free ``/wake`` probe -- the instant uvicorn is up, instead of
     waiting on a cold database connection. On a Render free-tier wake the
     schema is already at head, so this is a fast no-op once the (also cold)
     Neon database accepts a connection. Decoupling it from startup is what
@@ -36,7 +36,7 @@ async def run_migrations() -> None:
 
     Because the app is already serving, a failure can't abort startup; it is
     surfaced loudly in the logs instead. DB-touching endpoints will error
-    until the schema is fixed, but ``/health`` stays up so the frontend can
+    until the schema is fixed, but ``/wake`` stays up so the frontend can
     still detect liveness.
     """
     proc = await asyncio.create_subprocess_exec(
@@ -121,7 +121,7 @@ app.include_router(reference.router)  # handles /reference/conditions, /referenc
 app.include_router(trends.router)     # handles /trends/* (condition multipliers, future analyses)
 app.include_router(collection.router) # handles /collection/* (template, upload, mock, session)
 app.include_router(palette.router)    # handles /palette (color palette for dashboard charts)
-app.include_router(health.router)     # handles /health (used by the cold-start loader)
+app.include_router(health.router)     # handles /wake (used by the cold-start loader)
 
 
 @app.get("/", include_in_schema=False)

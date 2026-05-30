@@ -62,7 +62,7 @@ def test_run_migrations_failure_logs_stderr(capsys):
 
 
 def test_lifespan_serves_immediately_and_skips_cancel_when_task_done():
-    """/health is reachable while migrations run in the background.
+    """/wake is reachable while migrations run in the background.
 
     When the migration finishes before shutdown the cleanup skips ``cancel``,
     exercising the ``task.done()`` True branch.
@@ -74,7 +74,7 @@ def test_lifespan_serves_immediately_and_skips_cancel_when_task_done():
 
     with patch("main.run_migrations", _instant_migration):
         with TestClient(app) as c:
-            assert c.get("/health").status_code == 200
+            assert c.get("/wake").status_code == 200
             task = app.state.migration_task
             assert isinstance(task, asyncio.Task)
 

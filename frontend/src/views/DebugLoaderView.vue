@@ -1,7 +1,7 @@
 <template>
   <!--
     Debug harness for the cold-start loader. Mounts ColdStartLoader in
-    debug mode (no /health polling, no 3-minute error timeout) so the
+    debug mode (no /wake polling, no 3-minute error timeout) so the
     animation and error state can be iterated on without lagging the
     API server. Reachable via /debug/loader -- not linked from the nav.
   -->

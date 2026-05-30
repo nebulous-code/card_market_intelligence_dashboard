@@ -2,7 +2,7 @@
   <!--
     Full-screen overlay shown while the API is waking up from a Render cold
     start. Position-fixed at z-index 9999 so it sits over the AppLayout that
-    is mounted underneath. When /health responds the parent fades it out via
+    is mounted underneath. When /wake responds the parent fades it out via
     a Vue <Transition>, which is why this component does not animate its own
     opacity on unmount.
   -->
@@ -42,7 +42,7 @@
  * ColdStartLoader.
  *
  * Renders a themed full-screen loading overlay while the API is being woken
- * up from a Render free-tier cold start. Polls GET /health every 3 seconds;
+ * up from a Render free-tier cold start. Polls GET /wake every 3 seconds;
  * emits 'loaded' on the first successful response. After 3 minutes without
  * a response the component switches to an error state and stops polling.
  *
@@ -54,7 +54,7 @@
  * All three are cleared on unmount.
  *
  * Emits:
- *   loaded — fired once when /health returns a 2xx response.
+ *   loaded — fired once when /wake returns a 2xx response.
  */
 
 import { onMounted, onUnmounted, ref, watch } from "vue";
@@ -64,7 +64,7 @@ import { getHealth } from "../api/index.js";
 
 const props = defineProps({
   /**
-   * When true, suppress the /health polling and the 3-minute error timeout.
+   * When true, suppress the /wake polling and the 3-minute error timeout.
    * The loader simply renders its visual state. Used by the /debug/loader
    * page so the animation and error state can be inspected without needing
    * to lag the API server.
