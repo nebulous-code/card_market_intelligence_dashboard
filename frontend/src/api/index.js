@@ -214,6 +214,19 @@ export async function downloadCollectionTemplate() {
 }
 
 /**
+ * Download the active session's collection as a populated workbook. The
+ * server fills the four agent-populated tables in the template with the
+ * user's data and streams the result. Throws on 404 if no session is
+ * active so the caller can surface a "load a collection first" toast.
+ *
+ * @returns {Promise<Blob>}
+ */
+export async function downloadCollectionExcel() {
+  const response = await http.get("/collection/excel", { responseType: "blob" });
+  return response.data;
+}
+
+/**
  * Upload a filled-out collection workbook. On success the API sets a
  * session cookie and returns a summary; the caller redirects to the
  * collection dashboard. On row-level validation failure axios throws
