@@ -25,16 +25,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from io import BytesIO
 from pathlib import Path
-from typing import Any
 
-from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from schemas.collection import ParsedCollectionRow
+from services.xlsx_patcher import patch_tables
 
 
 TEMPLATE_PATH = (
@@ -76,6 +73,12 @@ def populate_template(
 
     Raises ``FileNotFoundError`` if the template asset is missing on
     the deployment -- the router catches this and returns 503.
+
+    The template carries Power Query, slicers, pivots, and other rich
+    Excel features. Population is done by direct .xlsx zip surgery
+    (see ``services.xlsx_patcher``) rather than openpyxl, because
+    openpyxl's load+save cycle silently drops any part it doesn't
+    model (Power Query and custom XML in particular).
     """
     if not TEMPLATE_PATH.exists():
         raise FileNotFoundError(str(TEMPLATE_PATH))
@@ -86,20 +89,16 @@ def populate_template(
     historic_rows = _collect_historic_rows(db, parsed_rows)
     upgrade_rows = _collect_upgrade_rows(db, parsed_rows)
 
-    # ``keep_links=True`` preserves any external references the real
-    # template may rely on (Power Query connections live as
-    # connections.xml, which openpyxl carries through unmodified).
-    wb = load_workbook(filename=TEMPLATE_PATH, keep_vba=False, keep_links=True)
-    try:
-        _write_table(wb, "collection_details", _DETAILS_COLUMNS, detail_rows)
-        _write_table(wb, "condition_multipliers", _MULTIPLIERS_COLUMNS, multiplier_rows)
-        _write_table(wb, "historic_prices", _HISTORIC_COLUMNS, historic_rows)
-        _write_table(wb, "card_prices_all_conditions", _UPGRADE_COLUMNS, upgrade_rows)
-        buf = BytesIO()
-        wb.save(buf)
-        return buf.getvalue()
-    finally:
-        wb.close()
+    template_bytes = TEMPLATE_PATH.read_bytes()
+    return patch_tables(
+        template_bytes,
+        {
+            "collection_details": (_DETAILS_COLUMNS, detail_rows),
+            "condition_multipliers": (_MULTIPLIERS_COLUMNS, multiplier_rows),
+            "historic_prices": (_HISTORIC_COLUMNS, historic_rows),
+            "card_prices_all_conditions": (_UPGRADE_COLUMNS, upgrade_rows),
+        },
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -387,69 +386,6 @@ _UPGRADE_COLUMNS = (
     "condition",
     "market_price",
 )
-
-
-def _write_table(wb, table_name: str, columns: tuple[str, ...], rows: list[dict]) -> None:
-    """Append ``rows`` to the Table named ``table_name``.
-
-    Existing data rows are cleared first; the header row is preserved
-    in place. The Table's ``ref`` is updated so Excel recognizes the
-    new last row.
-    """
-    sheet, table = _find_table(wb, table_name)
-    _clear_existing_data_rows(sheet, table, columns)
-
-    last_col_letter = get_column_letter(len(columns))
-    if not rows:
-        # Excel requires Tables to span >= 2 rows. Keep the original
-        # placeholder data row (one blank row beneath the header) so
-        # the file opens without an inconsistency warning.
-        table.ref = f"A1:{last_col_letter}2"
-        return
-
-    first_data_row = 2
-    last_data_row = first_data_row + len(rows) - 1
-    for offset, row in enumerate(rows):
-        row_idx = first_data_row + offset
-        for col_idx, name in enumerate(columns, start=1):
-            sheet.cell(row=row_idx, column=col_idx, value=_excel_value(row.get(name)))
-
-    table.ref = f"A1:{last_col_letter}{last_data_row}"
-
-
-def _find_table(wb, table_name: str):
-    for sheet in wb.worksheets:
-        if table_name in sheet.tables:
-            return sheet, sheet.tables[table_name]
-    raise KeyError(f"Table {table_name!r} not found in template")  # pragma: no cover
-
-
-def _clear_existing_data_rows(sheet, table, columns: tuple[str, ...]) -> None:
-    """Wipe any rows under the header so populated rows don't mix."""
-    if not table.ref:  # pragma: no cover -- generated templates always have a ref
-        return
-    # ``ref`` is e.g. "A1:S2"; pull the trailing row number.
-    end = table.ref.split(":")[1]
-    last_row = int("".join(ch for ch in end if ch.isdigit()))
-    if last_row < 2:
-        return  # pragma: no cover -- header-only refs aren't generated
-    for row_idx in range(2, last_row + 1):
-        for col_idx in range(1, len(columns) + 1):
-            sheet.cell(row=row_idx, column=col_idx, value=None)
-
-
-def _excel_value(value: Any) -> Any:
-    """Coerce values to types Excel handles natively.
-
-    Decimal is converted to float so cells display as numbers (the
-    default openpyxl behaviour stringifies Decimals). ``None`` stays
-    ``None`` so cells are blank for ``ISBLANK`` checks.
-    """
-    if value is None:
-        return None
-    if isinstance(value, Decimal):
-        return float(value)
-    return value
 
 
 # -----------------------------------------------------------------------------
