@@ -65,7 +65,7 @@ DATABASE_URL=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/neondb
 POKEMONTCG_API_KEY=your_key_here
 
 # --- Frontend ---
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=http://localhost:8151
 ```
 
 The `.env` file is gitignored. Never commit credentials to the repository.
@@ -107,10 +107,10 @@ Services and ports:
 
 | Service | URL |
 |---|---|
-| Frontend | http://localhost:5173 |
-| API | http://localhost:8000 |
-| API docs (Swagger) | http://localhost:8000/docs |
-| API docs (ReDoc) | http://localhost:8000/redoc |
+| Frontend | http://localhost:5151 |
+| API | http://localhost:8151 |
+| API docs (Swagger) | http://localhost:8151/docs |
+| API docs (ReDoc) | http://localhost:8151/redoc |
 
 ---
 
@@ -123,7 +123,7 @@ This mode runs the API and frontend natively using a Python venv and Node. No ad
 ```bash
 cd api
 uv sync
-uv run uvicorn main:app --reload --port 8000
+uv run uvicorn main:app --reload --port 8151
 ```
 
 ### Step 2 — Run the Frontend

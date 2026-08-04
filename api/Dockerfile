@@ -34,12 +34,12 @@ RUN uv sync --frozen --no-dev
 # Copy the rest of the application code into the container.
 COPY . .
 
-# Document that this container listens on port 8000.
+# Document that this container listens on port 8151.
 # This does not actually open the port -- that is done in docker-compose.yml.
-EXPOSE 8000
+EXPOSE 8151
 
 # Default command: start the Uvicorn ASGI server.
 # 0.0.0.0 makes the server accessible from outside the container
 # (within the Docker network), which is required for the frontend to
 # reach it. In native development mode, 127.0.0.1 is used instead.
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8151"]

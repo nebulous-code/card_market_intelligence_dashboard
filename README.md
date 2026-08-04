@@ -72,7 +72,7 @@ uv sync
 ./run.sh       # macOS / Linux
 ```
 
-The API runs on [http://localhost:8000](http://localhost:8000). Alembic migrations run automatically on startup — no manual schema setup required.
+The API runs on [http://localhost:8151](http://localhost:8151). Alembic migrations run automatically on startup — no manual schema setup required.
 
 ### 3. Run the ingestion script
 
@@ -94,7 +94,7 @@ npm install
 ./run.sh       # macOS / Linux
 ```
 
-The dashboard runs at [http://127.0.0.1:5173](http://127.0.0.1:5173).
+The dashboard runs at [http://127.0.0.1:5151](http://127.0.0.1:5151).
 
 ---
 
@@ -104,8 +104,8 @@ Interactive API documentation is available while the API is running:
 
 | | URL |
 | --- | --- |
-| Swagger UI | [http://localhost:8000/docs](http://localhost:8000/docs) |
-| ReDoc | [http://localhost:8000/redoc](http://localhost:8000/redoc) |
+| Swagger UI | [http://localhost:8151/docs](http://localhost:8151/docs) |
+| ReDoc | [http://localhost:8151/redoc](http://localhost:8151/redoc) |
 
 | Method | Endpoint | Description |
 | --- | --- | --- |

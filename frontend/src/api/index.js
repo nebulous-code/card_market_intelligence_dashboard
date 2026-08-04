@@ -9,7 +9,7 @@
  *
  * The base URL is read from the VITE_API_BASE_URL environment variable
  * defined in the .env file at the project root. If the variable is not
- * set, it falls back to http://localhost:8000.
+ * set, it falls back to http://localhost:8151.
  */
 
 import axios from "axios";
@@ -25,7 +25,7 @@ import axios from "axios";
 // below opts the line out of branch counting; line coverage is still
 // enforced.
 /* c8 ignore next */
-const baseURL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const baseURL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8151";
 
 const http = axios.create({
   baseURL,

@@ -33,8 +33,8 @@ COPY --from=deps /app/node_modules ./node_modules
 # Copy the application source code.
 COPY . .
 
-# Document that the Vite dev server listens on port 5173.
-EXPOSE 5173
+# Document that the Vite dev server listens on port 5151.
+EXPOSE 5151
 
 # Start the Vite development server.
 CMD ["npm", "run", "dev"]

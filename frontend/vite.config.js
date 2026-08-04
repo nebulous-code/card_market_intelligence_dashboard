@@ -33,7 +33,7 @@ export default defineConfig({
     // be accessible from other machines on the network, localhost is correct.
     host: "127.0.0.1",
 
-    port: 5173,
+    port: 5151,
 
     // Proxy requests whose path starts with /api to the backend server.
     // Only requests that explicitly begin with /api are forwarded -- the
@@ -41,7 +41,7 @@ export default defineConfig({
     // in practice. It is wired up now so that adding an /api prefix to the
     // API in a future milestone requires no frontend config changes.
     proxy: {
-      "/api": "http://localhost:8000",
+      "/api": "http://localhost:8151",
     },
   },
 });

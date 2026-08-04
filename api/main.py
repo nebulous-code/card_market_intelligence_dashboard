@@ -93,12 +93,12 @@ app = FastAPI(
 # Configure Cross-Origin Resource Sharing (CORS).
 #
 # By default, browsers refuse to let a web page on one address (the frontend
-# at port 5173) make requests to a different address (this API at port 8000).
+# at port 5151) make requests to a different address (this API at port 8151).
 # This is a browser security feature called the same-origin policy.
 
 origins = [
-    "http://localhost:5173", 
-    "http://127.0.0.1:5173",
+    "http://localhost:5151",
+    "http://127.0.0.1:5151",
     os.environ.get("FRONTEND_URL",""),
 ]
 

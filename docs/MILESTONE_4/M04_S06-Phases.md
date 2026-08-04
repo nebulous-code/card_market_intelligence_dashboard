@@ -6,7 +6,13 @@ About 70% of the work funnels through Power Query. Once that's solid the sheets 
 
 ---
 
-## Session 1 — De-risk first (30-60 min)
+## Session 1 — De-risk first (30-60 min) — DONE
+
+The round-trip failed on the original openpyxl-based export and was fixed rather than worked around. openpyxl rebuilds the `.xlsx` ZIP from its in-memory model on save and silently drops every part it doesn't model, including the `customXml` part where Power Query lives. Commit `4c4cf7b` replaced it with `api/services/xlsx_patcher.py`, which edits the ZIP in place: it finds each Table by `displayName`, rewrites only that sheet's `<sheetData>` and the Table's `ref`, and copies all other parts through byte-for-byte.
+
+Validated: patching all four data tables leaves the three `customXml` parts, `xl/connections.xml`, and `xl/queryTables/queryTable1.xml` byte-identical, with no parts lost or added. Power Query, slicers, pivots, and charts are all safe across export.
+
+Consequence for the build: `api/assets/collection_template.xlsx` is the source of truth and can hold all your queries and design work. Build in it directly and commit as you go. See `M04_S06-BuildSteps.md` for the workflow.
 
 The biggest unknown is whether openpyxl's save in S05 corrupts pivots, Power Query, or charts on round-trip. Find out *before* building anything fancy on top.
 
@@ -22,25 +28,60 @@ If **no** → foundation problem to solve before anything else. The likely culpr
 
 ---
 
-## Session 2 — Power Query foundation (1-2 hrs)
+## Session 2 — Power Query foundation (1-2 hrs) — DONE
 
-All four base queries, no charts yet. Each is just `Excel.CurrentWorkbook(){[Name="..."]}[Content]` with column type fixes.
+All four base queries, no charts yet. Each is just `Excel.CurrentWorkbook(){[Name="..."]}[Content]` with explicit column type fixes, loaded as "Connection only".
 
-- [ ] `qCollection` from `collection_details`
-- [ ] `qMultipliers` from `condition_multipliers`
-- [ ] `qHistoric` from `historic_prices`
-- [ ] `qPrices` from `card_prices_all_conditions`
+- [x] `qCollection` from `collection_details` — 19 typed columns
+- [x] `qPrices` from `card_prices_all_conditions` — 5 typed columns
+- [x] `qMultipliers` from `condition_multipliers` — 8 typed columns
+- [x] `qHistoric` from `historic_prices` — 6 typed columns
 
-**Done when:** all four show up in Queries & Connections and refresh without errors.
+Full M-code for all four is in `M04_S06-BuildSteps.md`.
+
+The Session 1 smoke-test query and its leftover "Test Query" output sheet were removed. The workbook is now exactly four sheets and four tables matching the four backend tables.
+
+Validated by decoding the stored `DataMashup` blob and round-tripping the file through `patch_tables`: all four queries present with the right source table and column count, `qHistoric.sample_date` typed `type date`, `qMultipliers.multiplier` typed `type number`, and every Power Query part byte-identical after export with no parts lost or added.
+
+Confirmed by hand: all four refresh cleanly in a workbook downloaded from the running app, so they evaluate correctly against real populated data and not just in the stored M code.
+
+### The external data source warning is expected
+
+Excel warns on open that the workbook connects to an external data source. It does not. All four queries read tables inside the file via `Excel.CurrentWorkbook()`, and every connection string reads `Data Source=$Workbook$`. Checked for `Web.Contents`, `OData.Feed`, `Sql.Database`, `Odbc`, `File.Contents`, `Folder.Files` and others — none are present.
+
+The warning fires because Excel routes all Power Query through an OLE DB provider, so each query registers in `xl/connections.xml` as `type="5"` (OLEDB). The Trust Center flags any OLEDB connection without inspecting whether it actually leaves the file, so every Power Query workbook triggers it. It cannot be suppressed from inside the file — it is a client-side Trust Center decision. Session 6's Read Me sheet should explain it, since a hiring manager opening the workbook will see the warning before anything else.
 
 ---
 
-## Session 3 — Cards Ranked + Sets Ranked (1-2 hrs)
+## Session 3 — Cards Ranked + Sets Ranked (1-2 hrs) — DONE
 
 Easiest sheets — pure tabular output. Builds confidence and tests your PQ.
 
-- **Cards Ranked:** load `qCollection` sorted by `total_value` desc + conditional formatting on gain columns + warning indicator on rows with `pricing_warning = TRUE`.
-- **Sets Ranked:** a `Table.Group` aggregation on `qCollection` (count, sum, completion %) + a databar on completion.
+- [x] **Cards Ranked:** `qCardsRanked` loads `qCollection` sorted by `total_value` desc, with red-white-green color scales on both gain columns and a `containsText` warning rule on `pricing_warning`.
+- [x] **Sets Ranked:** `qSetsRanked` is a `Table.Group` on `qCollection` giving distinct cards owned, total quantity, total value and completion percent, with a databar on completion.
+
+Both tabs renamed off their Power Query defaults. Validated: the queries are stored correctly, the databar bounds are pinned rather than automatic, and both sheets and tables survive the export untouched while the patcher rewrites only its four data tables. The internal table numbering shifted twice across this session as sheets were added, confirming the patcher resolves targets by `displayName` rather than file position.
+
+### The databar bounds must be pinned, not automatic
+
+Completion percent uses explicit `0` and `1` bounds. Left on Automatic, Excel scales bars to whatever range the data happens to contain, so a collection whose best set is 40% complete renders a full bar at 40% — which reads as finished. Pinning the bounds makes a bar mean the same thing in every workbook regardless of whose collection it is.
+
+Completion is measured against `set_printed_total`, while cards owned counts distinct `card_id` including secret rares numbered beyond that total. Owning secrets can therefore push a set past 100%, which is correct and worth showing; with the bounds pinned those simply render as a full bar. `set_total_with_secrets` is aggregated in the query but not displayed, in case that denominator is preferred later.
+
+### Mock collection covers the duplicate-card case
+
+`qSetsRanked` counts `List.Count(List.Distinct([card_id]))` rather than rows, because the same card appears once per condition and variant owned. A playset held in three conditions is three rows but one card toward set completion.
+
+The original mock collection could not exercise this: 20 rows, 20 unique cards, every quantity 1, so row count, distinct cards, and total quantity were identical everywhere. The distinction was invisible both to testing and to anyone evaluating the workbook. Three duplicate-card rows and one quantity bump were added, giving each set a different combination:
+
+| set | rows | unique cards | total quantity | shows |
+| --- | --- | --- | --- | --- |
+| Base Set | 6 | 5 | 7 | duplicate and quantity above one |
+| Jungle | 6 | 5 | 6 | duplicate only |
+| Fossil | 6 | 5 | 6 | duplicate only |
+| 151 | 5 | 5 | 7 | quantity above one, no duplicate |
+
+Validated by uploading the edited fixture to a running API: it passes validation, and `base1-4`, `base2-3` and `base3-5` each come back twice at different conditions. `POST /collection/mock` now reports 26 cards across 4 sets from 23 rows, so the card-count KPI also differs from the row count.
 
 **Done when:** both sheets render correctly with mock data.
 
@@ -92,7 +133,8 @@ Claude can't open the `.xlsx`, but can produce:
 - **Power Query M-code** for any of these queries — especially the bottom-10% treemap grouping, the upgrade-cost join with multiplier fallback, and the variant-token splitter (these are non-trivial).
 - **DAX or Excel formulas** for KPIs (e.g., the "only show if any card has purchase price" gates).
 - **Conditional-formatting rules** for the gain columns, warning indicator, completion databar.
-- Debugging the openpyxl save in `api/services/collection_excel.py` if Session 1 surfaces issues.
+- **Inspecting the saved `.xlsx` directly** — Claude can unzip the workbook, decode the `DataMashup` blob to list the queries actually stored in it, and run the template through `patch_tables` to confirm nothing is dropped on export. Useful as a fast check after saving, without needing a deploy.
+- Debugging `api/services/xlsx_patcher.py` if a future part (slicer, pivot cache, chart) turns out not to survive export.
 
 ---
 
