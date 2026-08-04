@@ -41,7 +41,7 @@ services:
   api:
     build: ./api          # Build using api/Dockerfile
     ports:
-      - "8000:8000"       # Expose port 8000 to the host machine
+      - "8151:8151"       # Expose port 8151 to the host machine
     env_file:
       - .env              # Load DATABASE_URL and other variables from .env
     restart: unless-stopped  # Restart if the container crashes
@@ -61,7 +61,7 @@ services:
   frontend:
     build: ./frontend     # Build using frontend/Dockerfile
     ports:
-      - "5173:5173"       # Expose port 5173 to the host machine
+      - "5151:5151"       # Expose port 5151 to the host machine
     env_file:
       - .env              # Provides VITE_API_BASE_URL to the frontend build
     depends_on:
