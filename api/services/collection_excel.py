@@ -38,6 +38,20 @@ TEMPLATE_PATH = (
     Path(__file__).resolve().parent.parent / "assets" / "collection_template.xlsx"
 )
 
+# The Tables this module writes into. The template also carries its own
+# presentation tables (Cards Ranked, Sets Ranked, the pivot staging
+# table) that are driven by Power Query on refresh; the patcher leaves
+# those untouched, so anything reasoning about "the tables we populate"
+# must go through this set rather than enumerating the workbook.
+PATCHED_TABLE_NAMES = frozenset(
+    {
+        "collection_details",
+        "condition_multipliers",
+        "historic_prices",
+        "card_prices_all_conditions",
+    }
+)
+
 # Raw conditions that have full snapshot coverage. Anything else
 # (PSA-10, BGS-9.5, unknown values) is filtered out of the historic
 # prices and card_prices tables -- their data lives elsewhere or not at

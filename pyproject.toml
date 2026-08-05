@@ -61,6 +61,14 @@ filterwarnings = [
     # FastAPI lifespan raises during startup -- our test_main lifespan-failure
     # test deliberately raises, and the leak is internal to anyio.
     "ignore::ResourceWarning",
+    # openpyxl cannot model Excel slicers (or several other OOXML
+    # extensions) and warns that it will drop them while *reading* a
+    # workbook. Tests only use openpyxl as a reader to assert on cell
+    # values; the real file is written by services.xlsx_patcher, which
+    # copies every part it does not target through byte-for-byte and so
+    # preserves the slicer intact. The warning describes a limitation of
+    # the test's reader, not a defect in the exported workbook.
+    "ignore:.* extension is not supported and will be removed:UserWarning",
 ]
 
 [tool.coverage.run]

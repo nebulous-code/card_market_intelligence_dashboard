@@ -24,6 +24,7 @@ from openpyxl import load_workbook
 from schemas.collection import ParsedCollectionRow
 from services.collection_excel import (
     EXCEL_MEDIA_TYPE,
+    PATCHED_TABLE_NAMES,
     SAMPLE_DAYS,
     TEMPLATE_PATH,
     _collect_details_rows,
@@ -495,17 +496,34 @@ def test_populate_template_blank_for_missing_purchase_price(
 def test_populate_template_empty_session_keeps_placeholder_refs(
     db_session,
 ):
-    """An empty session still produces a valid workbook -- each table
-    keeps its 2-row placeholder ref so Excel doesn't reject it."""
+    """An empty session still produces a valid workbook -- each of the
+    four populated tables keeps its 2-row placeholder ref so Excel
+    doesn't reject it.
+
+    Only the four tables the patcher targets are checked. The template
+    also carries the workbook's own presentation tables (Cards Ranked,
+    Sets Ranked, the pivot staging table), which are driven by Power
+    Query and legitimately hold their own row counts -- asserting over
+    every table in the file would fail as soon as a sheet is added.
+    """
     blob = populate_template(db_session, [])
     wb = load_workbook(BytesIO(blob))
+
+    found = set()
     for sheet in wb.worksheets:
         for tname in list(sheet.tables):
+            if tname not in PATCHED_TABLE_NAMES:
+                continue
+            found.add(tname)
             tab = sheet.tables[tname]
             assert tab.ref.endswith(":") is False  # well-formed
             # ref should still terminate at row 2 (header + one blank row)
             last_row = int("".join(c for c in tab.ref.split(":")[1] if c.isdigit()))
-            assert last_row == 2
+            assert last_row == 2, f"{tname} ref {tab.ref} should end at row 2"
+
+    # Guard against the filter silently matching nothing if a table is
+    # ever renamed -- an empty loop would otherwise pass vacuously.
+    assert found == PATCHED_TABLE_NAMES
 
 
 def test_populate_template_extends_table_ref_with_data(
