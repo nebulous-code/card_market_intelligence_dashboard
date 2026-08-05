@@ -87,15 +87,28 @@ Validated by uploading the edited fixture to a running API: it passes validation
 
 ---
 
-## Session 4 — Dashboard (2-3 hrs) — the showcase sheet
+## Session 4 — Dashboard (2-3 hrs) — the showcase sheet — IN PROGRESS
 
 The biggest single deliverable. Order matters:
 
-1. Pivot tables backing each chart (set-value, variant counts, gainers, losers).
-2. KPI cells (formulas off the pivots or off `qCollection`).
-3. Charts on top of pivots: pie, bar, treemap, gainers/losers.
-4. Slicers wired to pivots (Set, Rarity, Condition, optionally Variant).
-5. Clean it up: hide gridlines, theme colors.
+1. [x] Pivot tables backing each chart (set-value, variant counts, gainers, losers).
+2. [ ] KPI cells (formulas off the pivots or off `qCollection`).
+3. [x] Charts on top of pivots: pie, bar, gainers/losers.
+4. [~] Slicers wired to pivots — `set_name` done and driving all four pivots; Rarity, Condition and optionally Variant still to add.
+5. [ ] Clean it up: hide gridlines, hide working sheets, theme colors.
+
+The theme is applied: `Card Market Dashboard`, accent `E8412A`, Aptos Display / Aptos. See the theme packaging note below.
+
+All four pivots share a single `pivotCacheDefinition`, which is what lets one slicer drive every chart. New pivots must be made by **copying an existing pivot**, never Insert -> PivotTable: a fresh insert builds its own cache and a slicer silently fails to reach it.
+
+### Treemap is deliberately not in the Excel build
+
+Excel cannot build a treemap (or sunburst, histogram, box-and-whisker, waterfall, funnel) from a PivotTable — only classic chart types work with pivots. A static treemap from a helper table would ignore the slicers, and a dead chart sitting among live ones reads as broken rather than intentional. Decision: let the web app own the treemap. The two artifacts are not required to reach feature parity in either direction; the workbook has Upgrade Cost, which the site does not.
+
+### Outstanding issues
+
+- **Top Gainers / Top Losers plot two series on one value axis.** `gain_dollar` spans roughly plus or minus 320 while `gain_percent` reaches 39.5 (3947%), so the percent bars are drawn but visually flat. The percent series needs a secondary axis. Note that a bar-plus-line combo is not available here: Excel will not combine a horizontal bar series with a line series, so both stay bars on separate axes, and the two axes need distinguishing colors or titles so a reader does not assume one scale.
+- **`refreshOnLoad` is not set on `qCollection`.** Five of six connections have it. `qCollection` feeds `tData`, which backs every pivot, so on open the ranked sheets refresh while the dashboard quietly does not.
 
 **Done when:** clicking a slicer updates all dashboard charts together.
 
