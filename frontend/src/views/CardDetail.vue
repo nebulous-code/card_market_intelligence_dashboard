@@ -22,10 +22,26 @@
       <v-progress-circular indeterminate color="primary" size="48" />
     </div>
 
+    <!-- Nonexistent card. Distinct from a load failure so the user is
+         told the address is wrong rather than that something broke. -->
+    <div v-else-if="notFound">
+      <EmptyState
+        icon="mdi-help-circle-outline"
+        title="Card not found"
+        message="There is no card at this address. It may have been renamed, or the link may be mistyped."
+      />
+      <div class="mt-4 d-flex justify-center">
+        <v-btn color="primary" to="/sets">Browse sets</v-btn>
+      </div>
+    </div>
+
     <!-- Error state -->
-    <v-alert v-else-if="error" type="error" variant="tonal" class="mb-4">
-      {{ error }}
-    </v-alert>
+    <ErrorState
+      v-else-if="error"
+      class="mb-4"
+      title="Could not load this card"
+      :message="error"
+    />
 
     <!-- Card content -->
     <template v-else-if="card">
@@ -166,6 +182,9 @@ import {
   getReferenceConditions,
   getReferenceVariants,
 } from "../api/index.js";
+import EmptyState from "../components/EmptyState.vue";
+import ErrorState from "../components/ErrorState.vue";
+import { errorMessage, isNotFound } from "../utils/errorMessage.js";
 import { formatCurrency, formatDate } from "../utils/formatters.js";
 
 // Register Chart.js components needed for a line chart.
@@ -207,6 +226,7 @@ const referenceVariants = ref([]);
 const loading = ref(true);     // true while the initial card metadata is loading
 const historyLoading = ref(false); // true while price history is loading
 const error = ref(null);
+const notFound = ref(false);
 
 // Filter state — bound to the dropdowns.
 const selectedCondition = ref(null);
@@ -310,7 +330,14 @@ onMounted(async () => {
     setCrumb(1, setName, `/sets/${setId}`);
     setCrumb(2, cardLabel, null);
   } catch (e) {
-    error.value = `Failed to load card: ${e.message}`;
+    // Was `Failed to load card: ${e.message}`, which put axios' own
+    // string in front of the user -- "Request failed with status code
+    // 404". A missing card gets its own copy and a way back.
+    if (isNotFound(e)) {
+      notFound.value = true;
+    } else {
+      error.value = errorMessage(e, "Could not load this card.");
+    }
   } finally {
     loading.value = false;
   }

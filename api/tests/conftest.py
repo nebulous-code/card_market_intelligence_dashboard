@@ -75,6 +75,22 @@ def client(db_session):
         app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """Clear the shared rate-limit counters between tests.
+
+    The limiter is process-wide by design, so without this the suite
+    throttles itself: every upload test shares one client key and the
+    tenth would start coming back 429 for reasons unrelated to what the
+    test is asserting. Tests that exercise the limiter itself inject
+    their own instance and are unaffected.
+    """
+    from middleware.rate_limit import default_limiter
+
+    default_limiter().reset()
+    yield
+
+
 # ---------- data factory fixtures ----------
 #
 # Each fixture inserts straight via the per-test session, so rollback at

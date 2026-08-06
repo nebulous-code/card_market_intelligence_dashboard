@@ -20,6 +20,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import the URL route groups: sets, cards, reference data, trends, and liveness.
+from middleware.body_limit import ContentLengthLimitMiddleware
+from middleware.rate_limit import RateLimitMiddleware
 from routers import cards, collection, health, palette, reference, sets, trends
 
 
@@ -102,6 +104,23 @@ origins = [
     os.environ.get("FRONTEND_URL",""),
 ]
 
+# Refuse an over-sized upload on its Content-Length, before Starlette
+# spools the body to a temporary file. Without this the size check only
+# runs once the whole upload has been received, and a client can time
+# out waiting for a 413 the server could have answered instantly.
+app.add_middleware(ContentLengthLimitMiddleware)
+
+# Throttle the three write endpoints.
+#
+# Registered BEFORE CORS on purpose. Starlette's add_middleware does
+# insert(0, ...), so the LAST middleware registered ends up OUTERMOST.
+# Registering this one second would put it outside CORSMiddleware, and
+# its 429 would then be sent without an Access-Control-Allow-Origin
+# header -- the browser would report an opaque network failure and the
+# frontend would never see the status or the message. Verified: with
+# the order reversed the 429 comes back with ACAO absent.
+app.add_middleware(RateLimitMiddleware)
+
 # This middleware tells the browser it is safe to allow those requests.
 # Both localhost and 127.0.0.1 are listed because they refer to the same
 # machine but browsers treat them as different origins.
@@ -111,6 +130,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Retry-After is not on the CORS-safelisted response header list, so
+    # without this the frontend can see the 429 but not how long to wait.
+    expose_headers=["Retry-After"],
 )
 
 # Register the route groups with the application.

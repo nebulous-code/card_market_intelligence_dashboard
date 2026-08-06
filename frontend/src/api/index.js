@@ -27,6 +27,13 @@ import axios from "axios";
 /* c8 ignore next */
 const baseURL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8151";
 
+// Uploads get their own budget. The default suits a small JSON read,
+// but a file upload spends most of its time pushing bytes before the
+// server can answer at all -- so a large or slow upload hits the
+// deadline and reports a timeout, hiding whatever the server was about
+// to say (including "that file is too large").
+const UPLOAD_TIMEOUT_MS = 120000;
+
 const http = axios.create({
   baseURL,
   timeout: 15000,
@@ -239,7 +246,9 @@ export async function downloadCollectionExcel() {
 export async function uploadCollection(file) {
   const form = new FormData();
   form.append("file", file);
-  const { data } = await http.post("/collection/upload", form);
+  const { data } = await http.post("/collection/upload", form, {
+    timeout: UPLOAD_TIMEOUT_MS,
+  });
   return data;
 }
 
@@ -255,6 +264,7 @@ export async function downloadAnnotatedWorkbook(file) {
   form.append("file", file);
   const response = await http.post("/collection/upload/annotated", form, {
     responseType: "blob",
+    timeout: UPLOAD_TIMEOUT_MS,
   });
   return response.data;
 }

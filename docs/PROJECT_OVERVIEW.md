@@ -104,7 +104,7 @@ Milestones are ordered so that the most foundational skills are demonstrated fir
 
 ---
 
-### Milestone 3 — Expanded Data and Reporting
+### Milestone 3 — Expanded Data and Reporting (Complete)
 
 **Goal:** Stabilize the data pipeline, broaden the dataset to multiple sets, and build out the full frontend navigation structure.
 
@@ -122,32 +122,40 @@ Milestones are ordered so that the most foundational skills are demonstrated fir
 
 ---
 
-### Milestone 4 — Excel and Power BI Integration
+### Milestone 4 — Collection Analysis and Excel Integration (Complete)
 
 **Goal:** Demonstrate reporting and business intelligence skills as a complement to the web application.
 
 **Scope:**
 
-- Add export-to-Excel from the Vue frontend with formatted output
-- Build a Power BI report connected to the PostgreSQL database
-- Collection CSV feature — users upload a CSV of their cards and receive an Excel report of collection value and performance
+- Condition multiplier analysis — observed price ratios between card conditions
+- Collection upload — users submit a workbook of their cards and get it validated, priced and stored against a session
+- Collection dashboard in the web app, with slicers over set, rarity, condition and variant
+- Export-to-Excel from the Vue frontend, populating a designed workbook with the user's collection
+- Excel template built on Power Query: dashboard with linked slicers, ranked sheets, an upgrade-cost analyzer, and a value-over-time chart
 
-**Outcome:** The project spans the full range of reporting environments — web dashboard, spreadsheet export, and BI tooling.
+**Outcome:** The project spans web dashboard and spreadsheet reporting, with the Excel workbook standing as an analytical artifact in its own right rather than a flat data dump.
+
+**Descoped:** the Power BI report originally listed here was not built. The Excel workbook covers the same ground — self-service BI over the same data — and a `.pbix` file is a weaker portfolio artifact than a workbook a reviewer can open without a Power BI licence. Moved to the Milestone 6+ roadmap rather than dropped.
 
 ---
 
-### Milestone 5 — Polish and Hardening
+### Milestone 5 — Polish and Hardening (Complete)
 
 **Goal:** Bring the application to a production-ready standard.
 
 **Scope:**
 
-- Add API key authentication
-- Improve error handling, loading states, and empty states throughout the frontend
-- Expand documentation — API reference, architecture notes
-- Production hardening and monitoring improvements
+- Upload resource caps — request size, zip decompression bombs, archive shape, and row count, so an unauthenticated upload cannot exhaust memory or the database
+- Rate limiting on the three write endpoints, keyed on the forwarded client address
+- Error and empty states across every view that fetches data, with a shared error component and a tested message normalizer
+- A catch-all route, so a mistyped URL is a page rather than a blank body
 
-**Outcome:** The application reflects the care and completeness expected in a production environment.
+**Outcome:** The application reflects the care and completeness expected in a production environment. See [`docs/MILESTONE_5/DONE-M05_S01-HardeningAndStates.md`](./MILESTONE_5/DONE-M05_S01-HardeningAndStates.md).
+
+**Descoped:** API key authentication. The frontend is a public SPA, so any key it carries ships in the JavaScript bundle and authenticates nothing, and there is no privileged operation to protect — every write is scoped to the caller's own session cookie. The real exposure was resource abuse, which the caps and rate limits address directly. Authentication becomes necessary when the Milestone 6 admin panel or a public API exists.
+
+**Also descoped:** a hand-written API reference, since FastAPI generates one at `/docs`, and monitoring beyond what Render provides.
 
 ---
 

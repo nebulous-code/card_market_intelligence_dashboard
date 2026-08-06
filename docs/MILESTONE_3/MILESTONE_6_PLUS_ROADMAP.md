@@ -6,6 +6,20 @@ Items are loosely grouped by theme. Nothing here has a fixed milestone assignmen
 
 ---
 
+## Power BI Report
+
+Originally scoped into Milestone 4 and descoped when the Excel workbook absorbed the same purpose. Kept here rather than dropped, because a Power BI report would demonstrate a different toolchain rather than repeat what the workbook already shows.
+
+Reasons it was deferred rather than built:
+
+- The Excel workbook already demonstrates self-service BI over the same data — Power Query, a slicer-driven dashboard, pivots and a parameterised analyzer
+- A `.pbix` file cannot be opened by a reviewer without Power BI Desktop, whereas the workbook opens anywhere
+- Publishing to Power BI Service for a shareable link requires a paid tier for most sharing scenarios
+
+If revisited, the natural shape is a direct connection to the Postgres instance rather than an import of the collection session, since the interesting Power BI story is the market-wide price history rather than a single user's collection.
+
+---
+
 ## Custom Domain
 
 Replace the default `onrender.com` subdomain with a custom domain name for both the frontend and API services. A custom domain makes the portfolio link more memorable and professional when sharing with hiring managers.

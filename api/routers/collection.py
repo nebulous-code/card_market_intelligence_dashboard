@@ -62,6 +62,12 @@ from services.collection_session import (
 )
 from services.collection_template import build_template_workbook, template_filename
 from services.collection_validator import validate_workbook
+from services.upload_guard import (
+    UploadNotReadable,
+    UploadTooLarge,
+    check_workbook_bytes,
+    read_capped,
+)
 
 from decimal import Decimal
 
@@ -150,13 +156,43 @@ def download_template(db: Session = Depends(get_db)) -> StreamingResponse:
     return StreamingResponse(BytesIO(blob), media_type=XLSX_MEDIA_TYPE, headers=headers)
 
 
+def _guard_error(exc: Exception) -> HTTPException:
+    """Map an ``upload_guard`` exception onto its HTTP status.
+
+    413 for "too big to process", 422 for "not something we can open" --
+    matching the existing convention where 422 means the payload was
+    understood as a request but could not be used (``:167`` below).
+    """
+    status = 413 if isinstance(exc, UploadTooLarge) else 422
+    return HTTPException(status_code=status, detail=str(exc))
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    """Read an uploaded file within the byte cap and sanity-check it.
+
+    Applied only to the two endpoints that accept a file from the
+    caller. ``/collection/mock`` reads a workbook shipped inside the
+    image, so it needs neither the byte cap nor the archive check -- but
+    it still passes through the row cap inside ``validate_workbook``.
+    """
+    try:
+        file_bytes = await read_capped(file)
+        check_workbook_bytes(file_bytes)
+    except (UploadTooLarge, UploadNotReadable) as exc:
+        raise _guard_error(exc) from exc
+    return file_bytes
+
+
 def _process_upload(
     file_bytes: bytes,
     db: Session,
     response: Response,
 ) -> UploadSuccess:
     """Validate the bytes, persist, set the cookie. Raise 422 on errors."""
-    result = validate_workbook(file_bytes, db)
+    try:
+        result = validate_workbook(file_bytes, db)
+    except (UploadTooLarge, UploadNotReadable) as exc:
+        raise _guard_error(exc) from exc
     if result.has_errors:
         failure = UploadValidationFailure(
             structural_error=result.structural_error,
@@ -183,7 +219,7 @@ async def upload_collection(
     db: Session = Depends(get_db),
 ) -> UploadSuccess:
     """Validate an uploaded workbook and create a session on success."""
-    file_bytes = await file.read()
+    file_bytes = await _read_upload(file)
     return _process_upload(file_bytes, db, response)
 
 
@@ -195,8 +231,11 @@ async def download_annotated_workbook(
     """Re-validate a workbook and return it with an Error column added."""
     from io import BytesIO
 
-    file_bytes = await file.read()
-    annotated = annotate_workbook(file_bytes, db)
+    file_bytes = await _read_upload(file)
+    try:
+        annotated = annotate_workbook(file_bytes, db)
+    except (UploadTooLarge, UploadNotReadable) as exc:
+        raise _guard_error(exc) from exc
     headers = {
         "Content-Disposition": 'attachment; filename="collection-errors.xlsx"'
     }

@@ -15,6 +15,17 @@
       </v-col>
     </v-row>
 
+    <!-- Error state. Must come before the empty check: a failed request
+         leaves sets empty too, and "No sets found" would misreport an
+         outage as an empty database. -->
+    <ErrorState
+      v-else-if="loadError"
+      title="Could not load sets"
+      :message="loadError"
+      retry-label="Try again"
+      @retry="loadSets"
+    />
+
     <!-- Empty state -->
     <EmptyState
       v-else-if="sets.length === 0"
@@ -104,18 +115,31 @@
 import { onMounted, ref } from "vue";
 import { getSets } from "../api/index.js";
 import EmptyState from "../components/EmptyState.vue";
+import ErrorState from "../components/ErrorState.vue";
+import { errorMessage } from "../utils/errorMessage.js";
 import { formatCurrency, formatMonthYear } from "../utils/formatters.js";
 
 const sets = ref([]);
 const loadingSets = ref(true);
+const loadError = ref("");
 
-onMounted(async () => {
+// Previously try/finally with no catch, which meant a failed request
+// left `sets` empty and the template fell through to "No sets found" --
+// telling the user the database is empty when in fact we never heard
+// back from the server.
+async function loadSets() {
+  loadingSets.value = true;
+  loadError.value = "";
   try {
     sets.value = await getSets();
+  } catch (err) {
+    loadError.value = errorMessage(err, "Could not load sets.");
   } finally {
     loadingSets.value = false;
   }
-});
+}
+
+onMounted(loadSets);
 
 function setInitials(name) {
   return name
