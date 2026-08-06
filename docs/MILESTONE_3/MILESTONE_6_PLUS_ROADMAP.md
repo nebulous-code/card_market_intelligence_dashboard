@@ -142,6 +142,24 @@ Expansion is straightforward once the set mapping infrastructure (M03_S01) is st
 
 ---
 
+## Run Nightly Ingestion Against Dev
+
+The ingestion workflow reads a single `DATABASE_URL` secret, which points at production. Every branch resolves the same secret, so a `workflow_dispatch` run from a feature branch writes to prod exactly like the scheduled one does. **There is no way to test an ingestion change without running it against live data.**
+
+That is not theoretical. Debugging the `ON CONFLICT` cardinality failure took several runs against production, each one either writing rows or rolling back, with the only feedback being a summary email and manual database queries.
+
+What this would need:
+
+- A second secret, something like `DEV_DATABASE_URL`, pointing at the dev Neon branch
+- A `workflow_dispatch` input selecting the target, defaulting to production so the scheduled run is unchanged
+- The credit budget is not a blocker — a full Base Set pull with history and eBay is roughly 300 credits against a 20,000/day allowance, so a dev run costs about 1.5% of a day
+
+Two things make this more valuable than it first looks. Dev already carries far richer data than prod (518k snapshots with all five conditions, versus prod's NM-only history), so it is the better environment for exercising the multiplier and Excel paths. And ingestion is the part of the system with the least test coverage of its real failure modes, because those only appear against a live API and a real database.
+
+Worth pairing with a `--dry-run` flag that fetches and parses but does not write, which would catch shape changes in the PPT response without touching either database.
+
+---
+
 ## Performance and Scalability
 
 At current scale (4 sets, ~400 cards, daily snapshots) performance is not a concern. At larger scale — 50+ sets, 10,000+ cards, years of daily snapshots — some investment would be needed:
