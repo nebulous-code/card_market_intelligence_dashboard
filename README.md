@@ -39,10 +39,10 @@ This is a portfolio project built to demonstrate full-stack development, API des
 | Milestone | Description | Status |
 | --- | --- | --- |
 | 1 | Minimum viable demo — full vertical slice | Complete |
-| 2 | Real market pricing via eBay, price history | Not started |
-| 3 | Multi-set support, analytical reporting | Not started |
-| 4 | Excel export, Power BI integration | Not started |
-| 5 | Auth, automation, production hardening | Not started |
+| 2 | Real market pricing, price history | Complete |
+| 3 | Multi-set support, analytical reporting | Complete |
+| 4 | Collection upload, dashboard, Excel export | Complete |
+| 5 | Upload resource caps, rate limiting, interface states | Complete |
 
 ---
 

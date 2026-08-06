@@ -16,14 +16,14 @@
 
     <v-skeleton-loader v-if="loading" type="article" />
 
-    <v-alert
+    <ErrorState
       v-else-if="error"
-      type="error"
-      variant="tonal"
       class="mb-4"
-    >
-      {{ error }}
-    </v-alert>
+      title="Could not load your collection"
+      :message="error"
+      retry-label="Try again"
+      @retry="loadCollection"
+    />
 
     <template v-else-if="cards.length > 0">
       <CollectionKpis :cards="filteredCards" />
@@ -60,6 +60,21 @@
         @clear-set-filter="onClearSetFilter"
         @reset-collection="onResetCollection"
       />
+    </template>
+
+    <!-- A session exists but holds no priced cards. Without this the
+         page rendered its header and Download button over blank space,
+         which reads as a broken dashboard rather than an empty one. -->
+    <template v-else>
+      <EmptyState
+        icon="mdi-cards-outline"
+        title="No priced cards in this collection"
+        message="Your upload was accepted, but none of its cards could be matched to current pricing. Check the card numbers and set names, then upload again."
+      />
+      <div class="mt-4 d-flex ga-2">
+        <v-btn color="primary" to="/collection">Upload another collection</v-btn>
+        <v-btn variant="tonal" @click="onResetCollection">Start over</v-btn>
+      </div>
     </template>
 
     <CollectionSlicerPanel
@@ -114,6 +129,9 @@ import {
   getCollectionCardsWithPrices,
   getPalette,
 } from '../api/index.js'
+import EmptyState from '../components/EmptyState.vue'
+import ErrorState from '../components/ErrorState.vue'
+import { errorMessage } from '../utils/errorMessage.js'
 import { variantBars } from '../utils/collectionStats.js'
 import {
   createEmptyFilterState,
@@ -193,10 +211,13 @@ async function onDownloadExcel() {
     const blob = await downloadCollectionExcel()
     triggerBlobDownload(blob, 'collection.xlsx')
   } catch (err) {
+    // 404 means no session, which is a user-state problem rather than
+    // a failure -- everything else (413, 429, offline) gets the shared
+    // wording so the new backend limits surface correctly here too.
     excelToastMessage.value =
       err?.response?.status === 404
         ? 'Please load a collection before downloading.'
-        : 'Excel export is not available yet.'
+        : errorMessage(err, 'Could not download the workbook.')
     excelToast.value = true
   } finally {
     downloadingExcel.value = false
@@ -268,8 +289,11 @@ watch(
   { deep: true },
 )
 
-onMounted(async () => {
-  hydrateFromQuery()
+// Named so the error state's retry button can call it again. A failed
+// load used to be terminal -- the only way out was a manual refresh.
+async function loadCollection() {
+  loading.value = true
+  error.value = ''
   try {
     const [collectionResponse, paletteResponse] = await Promise.all([
       getCollectionCardsWithPrices(),
@@ -278,14 +302,22 @@ onMounted(async () => {
     cards.value = collectionResponse.cards
     palette.value = paletteResponse.colors ?? []
   } catch (err) {
+    // 404 means there is no session at all, which is a different story
+    // from a failure -- send the user to the upload page rather than
+    // showing an error for something they simply have not done yet.
     if (err?.response?.status === 404) {
       router.replace({ path: '/collection', query: { empty: '1' } })
       return
     }
-    error.value = 'Could not load your collection.'
+    error.value = errorMessage(err, 'Could not load your collection.')
   } finally {
     loading.value = false
   }
+}
+
+onMounted(() => {
+  hydrateFromQuery()
+  loadCollection()
 })
 
 // Expose to the runtime for the Phase 3+ components that will be

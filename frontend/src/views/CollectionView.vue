@@ -133,6 +133,7 @@ import {
   uploadCollection,
   useMockCollection,
 } from '../api/index.js'
+import { errorMessage } from '../utils/errorMessage.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -178,7 +179,7 @@ async function onDownloadTemplate() {
     const today = new Date().toISOString().slice(0, 10)
     triggerBlobDownload(blob, `card-collection-template-${today}.xlsx`)
   } catch (err) {
-    generalError.value = 'Could not download the template. Please try again.'
+    generalError.value = errorMessage(err, 'Could not download the template.')
   } finally {
     downloading.value = false
   }
@@ -212,12 +213,20 @@ async function submitFile(file) {
 }
 
 function handleUploadError(err) {
+  // A 422 carrying a structured body is a row-level validation failure,
+  // which drives the annotated-workbook panel below. It must be checked
+  // first and must not be flattened to a string.
   const detail = err?.response?.data?.detail
   if (err?.response?.status === 422 && detail && typeof detail === 'object') {
     validationFailure.value = detail
     return
   }
-  generalError.value = 'Could not process the upload. Please try again.'
+  // Everything else now goes through the shared normalizer. Previously
+  // this was a single fixed sentence, which meant an oversized file
+  // (413), a rate limit (429) and a dead connection all reported the
+  // same unhelpful "Could not process the upload" -- and the server's
+  // own explanation of which limit was hit was discarded.
+  generalError.value = errorMessage(err, 'Could not process the upload.')
 }
 
 async function onUseMock() {
@@ -227,7 +236,7 @@ async function onUseMock() {
     await useMockCollection()
     router.push('/collection/dashboard')
   } catch (err) {
-    generalError.value = 'Could not load the mock collection.'
+    generalError.value = errorMessage(err, 'Could not load the mock collection.')
   } finally {
     loadingMock.value = false
   }
@@ -240,7 +249,7 @@ async function onDownloadAnnotated() {
     const blob = await downloadAnnotatedWorkbook(lastUploadedFile.value)
     triggerBlobDownload(blob, 'collection-errors.xlsx')
   } catch (err) {
-    generalError.value = 'Could not generate the annotated workbook.'
+    generalError.value = errorMessage(err, 'Could not generate the annotated workbook.')
   } finally {
     annotating.value = false
   }

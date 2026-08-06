@@ -43,7 +43,7 @@
  *
  * Renders a themed full-screen loading overlay while the API is being woken
  * up from a Render free-tier cold start. Polls GET /wake every 3 seconds;
- * emits 'loaded' on the first successful response. After 3 minutes without
+ * emits 'loaded' on the first successful response. After 75 seconds without
  * a response the component switches to an error state and stops polling.
  *
  * The component owns:
@@ -75,7 +75,7 @@ const props = defineProps({
   },
   /**
    * When true, render the error state immediately. Useful for debug, and for
-   * the parent to short-circuit into the error UI without waiting 3 minutes.
+   * the parent to short-circuit into the error UI without waiting it out.
    */
   forceError: {
     type: Boolean,
@@ -87,7 +87,12 @@ const emit = defineEmits(["loaded"]);
 
 const POLL_INTERVAL_MS = 3000;
 const MESSAGE_INTERVAL_MS = 4000;
-const ERROR_TIMEOUT_MS = 180_000; // 3 minutes
+// 75 seconds. Long enough to clear a Render free-tier cold start,
+// which takes roughly 30 seconds, with headroom for a slow one. The
+// previous 3 minutes was well past the point where a person concludes
+// the site is broken and leaves -- and the error state it eventually
+// showed was more useful than the animation preceding it.
+const ERROR_TIMEOUT_MS = 75_000; // 75 seconds
 
 const messages = [
   "Waking up the server...",

@@ -3,6 +3,7 @@ import CardDetail from "../views/CardDetail.vue";
 import CollectionDashboardView from "../views/CollectionDashboardView.vue";
 import CollectionView from "../views/CollectionView.vue";
 import DebugLoaderView from "../views/DebugLoaderView.vue";
+import NotFoundView from "../views/NotFoundView.vue";
 import PrivacyView from "../views/PrivacyView.vue";
 import SetDetailView from "../views/SetDetailView.vue";
 import SetListView from "../views/SetListView.vue";
@@ -101,6 +102,19 @@ const routes = [
     component: DebugLoaderView,
     meta: {
       breadcrumbs: [{ title: "Debug" }, { title: "Loader" }],
+    },
+  },
+  {
+    // Catch-all. Must stay last -- vue-router matches in order, and a
+    // wildcard placed earlier would swallow every route below it.
+    //
+    // Needed because render.yaml rewrites all paths to index.html so
+    // client-side routing survives a refresh. Without this record a
+    // mistyped URL renders the nav bar and an empty body.
+    path: "/:pathMatch(.*)*",
+    component: NotFoundView,
+    meta: {
+      breadcrumbs: [{ title: "Not Found" }],
     },
   },
 ];

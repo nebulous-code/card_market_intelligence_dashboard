@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from schemas.collection import ParsedCollectionRow, RowError
+from services.upload_guard import UploadNotReadable, check_row_count
 from services.variant_normalizer import normalize as normalize_variant
 
 
@@ -84,9 +85,24 @@ def validate_workbook(file_bytes: bytes, db: Session) -> ValidationResult:
     """
     from io import BytesIO
 
-    wb = load_workbook(filename=BytesIO(file_bytes), data_only=True)
+    # Broad except on purpose. upload_guard has already rejected
+    # non-zips and archives lacking the OOXML skeleton, but a structurally
+    # valid workbook can still have malformed XML inside a sheet, which
+    # surfaces as ElementTree.ParseError -- and openpyxl has no common
+    # base class for its failure modes, so an explicit tuple would
+    # silently regress on the next openpyxl release. One clause, one
+    # branch, one test.
+    try:
+        wb = load_workbook(filename=BytesIO(file_bytes), data_only=True)
+    except Exception as exc:
+        raise UploadNotReadable("That workbook could not be opened.") from exc
+
     try:
         sheet = wb.worksheets[DATA_SHEET_INDEX]
+        # Bail before the loop below, which runs one card lookup per
+        # row. Checked here rather than in the guard because the row
+        # count is not knowable until the workbook is open.
+        check_row_count(sheet.max_row)
         headers = _read_headers(sheet)
         missing = [c for c in REQUIRED_COLUMNS if c not in headers]
         if missing:

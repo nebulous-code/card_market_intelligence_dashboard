@@ -49,6 +49,18 @@
           height="240"
         />
 
+        <!-- Error must be checked before the empty case: a failed
+             request also leaves cascadeRows empty, and claiming
+             "not enough price data yet" would blame the dataset for
+             an outage. -->
+        <ErrorState
+          v-else-if="loadError"
+          title="Could not load multipliers"
+          :message="loadError"
+          retry-label="Try again"
+          @retry="reload"
+        />
+
         <EmptyState
           v-else-if="cascadeRows.length === 0"
           icon="mdi-chart-box-outline"
@@ -204,6 +216,8 @@
 
 import { computed, onMounted, ref, watch } from "vue";
 import EmptyState from "../../components/EmptyState.vue";
+import ErrorState from "../../components/ErrorState.vue";
+import { errorMessage } from "../../utils/errorMessage.js";
 import {
   getConditionMultipliers,
   getSetsWithMultipliers,
@@ -224,15 +238,21 @@ const groupingType = ref("rarity");
 
 const multiplierData = ref(null);
 const loadingMultipliers = ref(false);
+// Kept separate from the empty state so an outage is never reported as
+// a gap in the data.
+const loadError = ref("");
 
 async function loadAvailableSets() {
   loadingSets.value = true;
+  loadError.value = "";
   try {
     const response = await getSetsWithMultipliers();
     availableSets.value = response.sets;
     if (availableSets.value.length > 0 && selectedSetId.value == null) {
       selectedSetId.value = availableSets.value[0].set_id;
     }
+  } catch (err) {
+    loadError.value = errorMessage(err, "Could not load sets.");
   } finally {
     loadingSets.value = false;
   }
@@ -241,16 +261,29 @@ async function loadAvailableSets() {
 async function loadMultipliers() {
   if (!selectedSetId.value) return;
   loadingMultipliers.value = true;
+  loadError.value = "";
   try {
     multiplierData.value = await getConditionMultipliers(
       selectedSetId.value,
       groupingType.value,
     );
-  } catch {
-    // Failure leaves multiplierData null; the empty-state path handles it.
+  } catch (err) {
+    // Previously swallowed, letting the empty state claim there was
+    // "not enough price data yet" when in fact the request failed --
+    // a data-quality story told about an outage.
     multiplierData.value = null;
+    loadError.value = errorMessage(err, "Could not load condition multipliers.");
   } finally {
     loadingMultipliers.value = false;
+  }
+}
+
+/** Retry whichever request failed. */
+function reload() {
+  if (availableSets.value.length === 0) {
+    loadAvailableSets();
+  } else {
+    loadMultipliers();
   }
 }
 

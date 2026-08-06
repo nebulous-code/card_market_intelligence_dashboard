@@ -196,6 +196,10 @@ describe("uploadCollection", () => {
     expect(path).toBe("/collection/upload");
     expect(form).toBeInstanceOf(FormData);
     expect(form.get("file")).toBe(file);
+    // Uploads override the default timeout: the default is tuned for a
+    // small JSON read, and a large file spends its budget pushing bytes
+    // before the server can reply at all.
+    expect(httpPost.mock.calls[0][2]).toEqual({ timeout: 120000 });
     expect(result).toEqual({ session_id: "abc", card_count: 3, set_count: 1 });
   });
 });
@@ -212,7 +216,7 @@ describe("downloadAnnotatedWorkbook", () => {
     expect(path).toBe("/collection/upload/annotated");
     expect(form).toBeInstanceOf(FormData);
     expect(form.get("file")).toBe(file);
-    expect(opts).toEqual({ responseType: "blob" });
+    expect(opts).toEqual({ responseType: "blob", timeout: 120000 });
     expect(result).toBe(blob);
   });
 });

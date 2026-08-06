@@ -16,6 +16,7 @@ the follow-up ``/session`` read uses. Tests that need to bypass this
 behaviour clear ``client.cookies`` first.
 """
 
+import zipfile
 from io import BytesIO
 
 import pytest
@@ -140,6 +141,99 @@ def test_upload_row_errors_returns_422(client, sample_cards):
     assert detail["total_rows"] == 1
     assert len(detail["error_rows"]) == 1
     assert detail["distinct_error_messages"]
+
+
+def test_upload_rejects_non_workbook_with_422_not_500(client):
+    """A payload that is not a zip used to reach openpyxl and raise
+    BadZipFile, which nothing caught -- the caller got a bare 500 and a
+    stack trace went to the logs."""
+    response = client.post(
+        "/collection/upload",
+        files={"file": ("notes.txt", b"just some text", "text/plain")},
+    )
+    assert response.status_code == 422
+    assert "not a readable" in response.json()["detail"]
+
+
+def test_upload_rejects_valid_zip_that_is_not_a_workbook(client):
+    """Caught by the archive skeleton check. Previously reached openpyxl
+    and came back as a 500."""
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("readme.txt", "hello")
+    response = client.post(
+        "/collection/upload",
+        files={"file": ("looks_ok.xlsx", buf.getvalue(), "application/octet-stream")},
+    )
+    assert response.status_code == 422
+    assert "not an Excel workbook" in response.json()["detail"]
+
+
+def test_upload_rejects_workbook_with_corrupt_internals(client):
+    """A structurally valid .xlsx whose sheet XML is malformed. Passes
+    every archive-level check and only fails once openpyxl parses it,
+    which used to escape as an unhandled ParseError."""
+    good = _build_workbook(rows=[_valid()])
+    broken = BytesIO()
+    with zipfile.ZipFile(BytesIO(good)) as src:
+        with zipfile.ZipFile(broken, "w") as dst:
+            for item in src.infolist():
+                data = src.read(item.filename)
+                if item.filename.endswith("sheet1.xml"):
+                    data = b"<worksheet><unclosed>"
+                dst.writestr(item, data)
+    response = client.post(
+        "/collection/upload",
+        files={"file": ("collection.xlsx", broken.getvalue(), "application/octet-stream")},
+    )
+    assert response.status_code == 422
+    assert "could not be opened" in response.json()["detail"]
+
+
+def test_upload_rejects_oversized_file_with_413(client, monkeypatch):
+    monkeypatch.setenv("MAX_UPLOAD_BYTES", "2048")
+    blob = _build_workbook(rows=[_valid()])
+    assert len(blob) > 2048, "fixture must exceed the lowered cap"
+    response = client.post(
+        "/collection/upload",
+        files={"file": ("collection.xlsx", blob, "application/octet-stream")},
+    )
+    assert response.status_code == 413
+
+
+def test_upload_rejects_too_many_rows_with_413(client, sample_cards, monkeypatch):
+    """The row cap exists because validation runs one card lookup per
+    row, so a tall sheet is a database problem regardless of file size."""
+    monkeypatch.setenv("MAX_DATA_ROWS", "3")
+    blob = _build_workbook(rows=[_valid() for _ in range(10)])
+    response = client.post(
+        "/collection/upload",
+        files={"file": ("collection.xlsx", blob, "application/octet-stream")},
+    )
+    assert response.status_code == 413
+    assert "not supported at this time" in response.json()["detail"]
+
+
+def test_annotated_endpoint_also_guards_bad_input(client):
+    """This endpoint previously raised no HTTPException at all."""
+    response = client.post(
+        "/collection/upload/annotated",
+        files={"file": ("notes.txt", b"not a workbook", "text/plain")},
+    )
+    assert response.status_code == 422
+
+
+def test_annotated_endpoint_guards_row_count(client, sample_cards, monkeypatch):
+    """A well-formed archive that only fails once opened. The archive
+    checks pass, so this exercises the guard around ``annotate_workbook``
+    rather than the one in the read path."""
+    monkeypatch.setenv("MAX_DATA_ROWS", "3")
+    blob = _build_workbook(rows=[_valid() for _ in range(10)])
+    response = client.post(
+        "/collection/upload/annotated",
+        files={"file": ("collection.xlsx", blob, "application/octet-stream")},
+    )
+    assert response.status_code == 413
 
 
 def test_upload_structural_error_returns_422(client, sample_cards):

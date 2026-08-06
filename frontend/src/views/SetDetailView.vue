@@ -3,6 +3,20 @@
     <!-- Loading state for header -->
     <v-skeleton-loader v-if="loadingSet" type="list-item-two-line" class="mb-6" />
 
+    <!-- Nonexistent set. Rendered instead of the page, not alongside it:
+         the chart and table below are hidden via v-if so a bad set id
+         cannot produce a page that looks like a real set with no cards. -->
+    <div v-else-if="notFound">
+      <EmptyState
+        icon="mdi-help-circle-outline"
+        title="Set not found"
+        message="There is no set at this address. It may have been renamed, or the link may be mistyped."
+      />
+      <div class="mt-4 d-flex justify-center">
+        <v-btn color="primary" to="/sets">Back to sets</v-btn>
+      </div>
+    </div>
+
     <!-- Set header -->
     <v-card v-else-if="set" class="mb-6">
       <v-card-text>
@@ -46,8 +60,20 @@
       </v-card-text>
     </v-card>
 
+    <!-- Load failure that is not a missing set. Shown above the content
+         rather than replacing it, since the header may have arrived even
+         when the cards did not. -->
+    <ErrorState
+      v-if="loadError && !notFound"
+      class="mb-6"
+      title="Could not load this set"
+      :message="loadError"
+      retry-label="Try again"
+      @retry="reload"
+    />
+
     <!-- Price distribution chart -->
-    <v-card class="mb-6">
+    <v-card v-if="!notFound" class="mb-6">
       <v-card-title class="text-subtitle-1 font-weight-bold pa-4">
         Price Distribution by Rarity
       </v-card-title>
@@ -70,7 +96,7 @@
 
     <!-- Filter status row: "Showing N of M" note + Clear Filters button -->
     <div
-      v-if="hasActiveFilters"
+      v-if="hasActiveFilters && !notFound"
       class="d-flex align-center mb-3"
     >
       <div
@@ -92,6 +118,7 @@
 
     <!-- Card table -->
     <CardTable
+      v-if="!notFound"
       :filters="filters"
       :cards="filteredCards"
       :available-rarities="availableRarities"
@@ -123,6 +150,8 @@ import {
 } from "../api/index.js";
 import CardTable from "../components/CardTable.vue";
 import EmptyState from "../components/EmptyState.vue";
+import ErrorState from "../components/ErrorState.vue";
+import { errorMessage, isNotFound } from "../utils/errorMessage.js";
 import { formatCompactCurrency, formatCurrency, formatDate, formatNumber } from "../utils/formatters.js";
 
 // Register Chart.js + box plot plugin
@@ -182,6 +211,10 @@ const loadingCards = ref(true);
 // table does not. Without this, the chart flashes the "No price data" empty
 // state during the brief window after cards return but before prices do.
 const loadingPrices = ref(true);
+// Split from a generic error so a nonexistent set gets its own copy and
+// its own way onward, rather than a vague failure message.
+const loadError = ref("");
+const notFound = ref(false);
 
 // Number of secret rares = total cards in DB minus the printed count.
 // Falls back to 0 when set hasn't loaded yet or counts disagree (defensive).
@@ -450,14 +483,32 @@ const chartOptions = {
   },
 };
 
+// Previously no catch on either loader, so /sets/bogus rendered a
+// breadcrumb, an empty chart and an empty table -- a page that looks
+// like a real set containing nothing, rather than one that says the set
+// does not exist.
 async function loadSet() {
   loadingSet.value = true;
+  loadError.value = "";
+  notFound.value = false;
   try {
     set.value = await getSet(setId.value);
     setCrumb(1, set.value.name, null);
+  } catch (err) {
+    if (isNotFound(err)) {
+      notFound.value = true;
+    } else {
+      loadError.value = errorMessage(err, "Could not load this set.");
+    }
   } finally {
     loadingSet.value = false;
   }
+}
+
+/** Retry both loaders together -- either one may have been the failure. */
+function reload() {
+  loadSet();
+  loadCards();
 }
 
 async function loadCards() {
@@ -467,6 +518,11 @@ async function loadCards() {
   pricesByCardId.value = {};
   try {
     cards.value = await getCardsForSet(setId.value);
+  } catch (err) {
+    // Distinct from loadSet's error: the set exists but its cards did
+    // not arrive. Without this the table just renders Vuetify's default
+    // "No data available", which reads as a set with no cards in it.
+    loadError.value = errorMessage(err, "Could not load cards for this set.");
   } finally {
     loadingCards.value = false;
   }
