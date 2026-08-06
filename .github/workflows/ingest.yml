@@ -18,11 +18,19 @@
 #                                      Unset (or 0) means no cap (full nightly run).
 #
 # Email notification secrets (set in repo Settings > Secrets):
-#   GMAIL_USERNAME      -- Gmail address used to send the summary email
-#   GMAIL_APP_PASSWORD  -- Gmail App Password (NOT your regular password).
-#                          Generate at myaccount.google.com → Security → App Passwords.
-#                          Requires 2-factor authentication to be enabled first.
-#   NOTIFY_EMAIL        -- Address to send the summary to (can equal GMAIL_USERNAME)
+#   RESEND_API_KEY      -- Resend API key, used as the SMTP password.
+#                          Same key the other nebulouscode projects use.
+#   NOTIFY_EMAIL        -- Address to send the summary to
+#
+# Optional variables (Settings > Variables):
+#   EMAIL_FROM          -- Overrides the sender. Must be an address on a
+#                          domain verified in Resend, or the send is
+#                          rejected. Defaults to the value below.
+#
+# Sending goes through Resend rather than Gmail. Gmail App Passwords are
+# being retired, and a personal mail account was never the right sender
+# for automated mail anyway -- deliverability depends on a verified
+# sending domain, which Resend provides.
 #
 # The workflow can also be triggered manually from the Actions tab using
 # workflow_dispatch, which is useful for testing or running a backfill.
@@ -113,14 +121,16 @@ jobs:
         if: always()
         uses: dawidd6/action-send-mail@v3
         with:
-          server_address: smtp.gmail.com
+          # Resend's SMTP bridge. The username is the literal string
+          # "resend" for every account -- the API key is the password.
+          server_address: smtp.resend.com
           server_port: 465
           secure: true
-          username: ${{ secrets.GMAIL_USERNAME }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          username: resend
+          password: ${{ secrets.RESEND_API_KEY }}
           subject: "[Card Market] Nightly Ingestion — ${{ env.RUN_DATE }} — ${{ env.RUN_STATUS }}"
           to: ${{ secrets.NOTIFY_EMAIL }}
-          from: Card Market Ingestion <${{ secrets.GMAIL_USERNAME }}>
+          from: ${{ vars.EMAIL_FROM || 'Card Market Ingestion <noreply@mail.nebulouscode.com>' }}
           body: |
             ${{ env.EMAIL_BODY }}
 
