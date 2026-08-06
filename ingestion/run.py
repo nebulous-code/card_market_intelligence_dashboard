@@ -122,11 +122,15 @@ def main() -> None:
     with Session(engine) as session:
         sets = get_all_sets(session)
 
+    # Deliberately not an early exit. Returning here would skip the
+    # summary block below, which is what writes EMAIL_BODY to
+    # GITHUB_ENV -- so an empty database sent the "script crashed"
+    # fallback email while the job itself went green. Falling through
+    # with an empty list produces an accurate summary instead.
     if not sets:
         log.warning("No sets found in the database. Run the TCGdex ingestion first.")
-        sys.exit(0)
-
-    log.info("Found %d sets to process: %s", len(sets), [s["id"] for s in sets])
+    else:
+        log.info("Found %d sets to process: %s", len(sets), [s["id"] for s in sets])
 
     sets_completed = 0
     sets_skipped = 0
@@ -257,9 +261,18 @@ def main() -> None:
     from datetime import date as _date
     run_date = _date.today().isoformat()
 
+    # Status has to account for set-level failures, not just card-level
+    # ones. A run where every set failed to fetch or insert used to
+    # report "0 processed / 0 errors / Success" -- technically each
+    # counter was zero, but nothing had happened and the email said so
+    # cheerfully. sets_skipped is the counter that actually knows.
     if run_total_errors > 0:
         overall_status = "❌ Failed"
-    elif run_total_skipped > 0:
+    elif not sets:
+        overall_status = "❌ Failed (no sets in database)"
+    elif sets_completed == 0:
+        overall_status = "❌ Failed (no sets completed)"
+    elif sets_skipped > 0 or run_total_skipped > 0:
         overall_status = "⚠️ Warnings"
     else:
         overall_status = "✅ Success"
@@ -273,6 +286,7 @@ def main() -> None:
         f"\n{sep}\n"
         f"Nightly ingestion complete — {run_date}\n"
         f"  Sets processed : {sets_completed}\n"
+        f"  Sets skipped   : {sets_skipped}\n"
         f"  Total matched  : {run_total_matched}\n"
         f"  Total skipped  : {run_total_skipped}\n"
         f"  Total errors   : {run_total_errors}\n"
@@ -292,6 +306,14 @@ def main() -> None:
             f.write(f"RUN_DATE={run_date}\n")
             f.write(f"RUN_STATUS={overall_status}\n")
             f.write(f"EMAIL_BODY<<EOF\n{summary}\nEOF\n")
+
+    # Fail the job when the run failed. Previously main() always returned
+    # cleanly, so a run that wrote nothing still showed a green check and
+    # the only signal was an email nobody reads closely. Written after
+    # GITHUB_ENV so the summary still reaches the notification step,
+    # which runs with `if: always()`.
+    if overall_status.startswith("❌"):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -820,3 +820,130 @@ def test_module_imports_at_top_level(monkeypatch):
     assert loader.engine is not None
     # Sanity: datetime import is the ddl path used by _parse_date.
     assert datetime.strptime("2024-01-01", "%Y-%m-%d").year == 2024
+
+
+# ---------------------------------------------------------------------------
+# Conflict-key deduplication
+#
+# Postgres rejects an ON CONFLICT DO UPDATE statement that proposes the
+# same constrained values twice, and it rejects the whole statement --
+# so one duplicate loses every row for that card. This surfaced in
+# production the first time price history was enabled.
+# ---------------------------------------------------------------------------
+
+
+def test_dedupe_collapses_history_point_and_latest_price():
+    """The row builder emits a history point for today AND a latestPrice
+    row dated None (CURRENT_DATE). PPT's history includes today, so those
+    two collide -- this was the live failure."""
+    from datetime import date as _date
+
+    from loader import _dedupe_by_conflict_key
+
+    today = _date.today().isoformat()
+    rows = [
+        {"card_id": "c1", "source": "tcgplayer", "condition": "LP",
+         "variant": "holofoil", "market_price": 40.6, "captured_date": today},
+        {"card_id": "c1", "source": "tcgplayer", "condition": "LP",
+         "variant": "holofoil", "market_price": 41.9, "captured_date": None},
+    ]
+    out = _dedupe_by_conflict_key(rows)
+    assert len(out) == 1
+    # Later row wins: latestPrice is the fresher of the two numbers.
+    assert out[0]["market_price"] == 41.9
+
+
+def test_dedupe_treats_date_objects_and_iso_strings_as_equal():
+    """Callers are inconsistent about date types. Comparing them raw
+    would let a genuine duplicate through."""
+    from datetime import date as _date
+
+    from loader import _dedupe_by_conflict_key
+
+    rows = [
+        {"card_id": "c1", "source": "tcgplayer", "condition": "NM",
+         "variant": None, "market_price": 1, "captured_date": _date(2026, 5, 1)},
+        {"card_id": "c1", "source": "tcgplayer", "condition": "NM",
+         "variant": None, "market_price": 2, "captured_date": "2026-05-01"},
+    ]
+    assert len(_dedupe_by_conflict_key(rows)) == 1
+
+
+def test_dedupe_collapses_variants_that_normalize_together():
+    """Two raw variant strings can normalize to one canonical value,
+    which collides the same way."""
+    from loader import _dedupe_by_conflict_key
+
+    rows = [
+        {"card_id": "c1", "source": "tcgplayer", "condition": "NM",
+         "variant": "holofoil", "market_price": 1, "captured_date": "2026-05-01"},
+        {"card_id": "c1", "source": "tcgplayer", "condition": "NM",
+         "variant": "holofoil", "market_price": 2, "captured_date": "2026-05-01"},
+    ]
+    assert len(_dedupe_by_conflict_key(rows)) == 1
+
+
+def test_dedupe_keeps_genuinely_distinct_rows():
+    """Every component of the conflict key must actually discriminate."""
+    from loader import _dedupe_by_conflict_key
+
+    base = {"card_id": "c1", "source": "tcgplayer", "condition": "NM",
+            "variant": None, "market_price": 1, "captured_date": "2026-05-01"}
+    rows = [
+        base,
+        {**base, "card_id": "c2"},
+        {**base, "condition": "LP"},
+        {**base, "variant": "holofoil"},
+        {**base, "captured_date": "2026-05-02"},
+        {**base, "source": "other"},
+    ]
+    assert len(_dedupe_by_conflict_key(rows)) == 6
+
+
+def test_dedupe_empty_input():
+    from loader import _dedupe_by_conflict_key
+
+    assert _dedupe_by_conflict_key([]) == []
+
+
+def test_bulk_insert_survives_duplicate_conflict_keys(db_session):
+    """Regression for the live failure: a duplicated conflict key used to
+    abort the whole statement with CardinalityViolation, rolling back
+    every row for the card and leaving the watermark unmoved, so the run
+    retried the same doomed batch forever."""
+    from datetime import date as _date
+
+    from loader import _bulk_insert_snapshots
+
+    db_session.execute(
+        text(
+            "INSERT INTO sets (id, name, series, printed_total, created_at) "
+            "VALUES ('loader_dup', 'D', 'X', 1, NOW())"
+        )
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO cards (id, set_id, name, number, created_at) "
+            "VALUES ('loader_dup-1', 'loader_dup', 'C', '1', NOW())"
+        )
+    )
+
+    today = _date.today().isoformat()
+    rows = [
+        {"card_id": "loader_dup-1", "source": "tcgplayer", "condition": "LP",
+         "variant": "holofoil", "market_price": "40.60", "low_price": None,
+         "high_price": None, "captured_date": today},
+        {"card_id": "loader_dup-1", "source": "tcgplayer", "condition": "LP",
+         "variant": "holofoil", "market_price": "41.90", "low_price": None,
+         "high_price": None, "captured_date": None},
+    ]
+    _bulk_insert_snapshots(db_session, rows)  # Must not raise.
+
+    row = db_session.execute(
+        text(
+            "SELECT market_price FROM price_snapshots "
+            "WHERE card_id = 'loader_dup-1'"
+        )
+    ).fetchall()
+    assert len(row) == 1
+    assert float(row[0].market_price) == 41.90

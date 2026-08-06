@@ -16,7 +16,7 @@ Idempotency rules:
 
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from dotenv import find_dotenv, load_dotenv
@@ -455,6 +455,54 @@ def _nearby_numbers(
     return [x for x in by_distance if x != target][:n]
 
 
+def _dedupe_by_conflict_key(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse rows that would collide on the INSERT's conflict key.
+
+    Postgres refuses an ``ON CONFLICT DO UPDATE`` statement that proposes
+    the same constrained values twice -- "cannot affect row a second
+    time" -- and it rejects the whole statement, so a single duplicate
+    loses every row for that card.
+
+    Three ways duplicates arise, all of them real:
+
+    * The row builder emits a history point for today *and* a
+      ``latestPrice`` row for today. The comment there assumes history
+      never includes the current date; PPT does include it, so the two
+      collide on every card.
+    * Two distinct raw variant strings can normalize to the same
+      canonical variant. Same for conditions.
+    * The history array itself can repeat a date.
+
+    Deduping here rather than in the builder is deliberate: this is the
+    function that writes the conflict key, so the two cannot drift apart.
+    Later rows win, which means ``latestPrice`` supersedes the history
+    point for today -- the fresher of the two numbers.
+
+    ``captured_date`` of ``None`` means CURRENT_DATE in the SQL, so it
+    has to be resolved before comparing or the collision stays invisible
+    at the Python level. Runner and database are both UTC, so today's
+    date agrees between them outside a sub-second window at midnight --
+    and the schedule runs at 07:00 UTC.
+
+    Dates are stringified before comparison because callers are
+    inconsistent -- the row builder produces ISO strings while other
+    callers pass ``date`` objects, and ``date(2026, 5, 1) != "2026-05-01"``
+    would let a genuine duplicate through.
+    """
+    today = date.today().isoformat()
+    deduped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for row in rows:
+        key = (
+            row["card_id"],
+            row["source"],
+            row["condition"],
+            row.get("variant"),
+            str(row.get("captured_date") or today),
+        )
+        deduped[key] = row
+    return list(deduped.values())
+
+
 def _bulk_insert_snapshots(session: Session, rows: list[dict[str, Any]]) -> None:
     """
     Insert all snapshot rows for one card with a single multi-row INSERT.
@@ -472,6 +520,10 @@ def _bulk_insert_snapshots(session: Session, rows: list[dict[str, Any]]) -> None
     """
     if not rows:
         return
+
+    # A single duplicated conflict key aborts the entire statement, so
+    # every row for the card is lost. See _dedupe_by_conflict_key.
+    rows = _dedupe_by_conflict_key(rows)
 
     PARAMS_PER_ROW = 7
     MAX_ROWS_PER_STMT = 60000 // PARAMS_PER_ROW  # ~8500
