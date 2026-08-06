@@ -99,9 +99,9 @@ def validate_workbook(file_bytes: bytes, db: Session) -> ValidationResult:
 
     try:
         sheet = wb.worksheets[DATA_SHEET_INDEX]
-        # Bail before the loop below, which runs one card lookup per
-        # row. Checked here rather than in the guard because the row
-        # count is not knowable until the workbook is open.
+        # Bail before iterating. Checked here rather than in the guard
+        # because the row count is not knowable until the workbook is
+        # open, and the cap is a deliberate product limit.
         check_row_count(sheet.max_row)
         headers = _read_headers(sheet)
         missing = [c for c in REQUIRED_COLUMNS if c not in headers]
@@ -114,6 +114,14 @@ def validate_workbook(file_bytes: bytes, db: Session) -> ValidationResult:
             )
 
         set_lookup = _build_set_lookup(db)
+        # Two prefetches, then no database access at all inside the row
+        # loop. Card resolution used to run one query per row, which
+        # made upload time a function of round trips rather than of
+        # work -- roughly 48 ms per row against a remote database, so a
+        # thousand-row workbook spent the better part of a minute
+        # waiting on the network.
+        card_lookup = _build_card_lookup(db, _referenced_set_ids(sheet, headers, set_lookup))
+
         result = ValidationResult()
         # Iterate rows starting from FIRST_DATA_ROW; openpyxl rows are
         # 1-indexed and ws.iter_rows yields tuples of cells.
@@ -125,7 +133,7 @@ def validate_workbook(file_bytes: bytes, db: Session) -> ValidationResult:
                 continue
             result.total_rows += 1
             row_dict = _row_to_dict(headers, row)
-            parsed, errors = _validate_one(row_dict, row_idx, set_lookup, db)
+            parsed, errors = _validate_one(row_dict, row_idx, set_lookup, card_lookup)
             if errors:
                 result.row_errors.extend(errors)
             else:
@@ -179,11 +187,64 @@ def _build_set_lookup(db: Session) -> dict[str, str]:
     return lookup
 
 
+def _referenced_set_ids(sheet, headers: list[str], set_lookup: dict[str, str]) -> set[str]:
+    """Canonical set_ids the workbook mentions, for prefetching cards.
+
+    A cheap first pass over the sheet reading only the ``Set`` column.
+    Iterating an openpyxl sheet twice is safe in the default (non
+    read-only) mode -- the rows are already in memory, so this costs no
+    additional parsing.
+
+    Labels that do not resolve are skipped rather than reported. Row
+    validation reports them properly, with a row number; this pass only
+    needs to know which sets to fetch cards for.
+    """
+    set_ids: set[str] = set()
+    for row in sheet.iter_rows(min_row=FIRST_DATA_ROW, values_only=True):
+        if _row_is_blank(row):
+            continue
+        raw_set = _row_to_dict(headers, row).get("Set")
+        if raw_set is None:
+            continue
+        set_id = set_lookup.get(str(raw_set).strip().lower())
+        if set_id is not None:
+            set_ids.add(set_id)
+    return set_ids
+
+
+def _build_card_lookup(db: Session, set_ids: set[str]) -> dict[tuple[str, str], str]:
+    """Map ``(set_id, number)`` -> ``cards.id`` for the given sets.
+
+    Replaces a per-row query. Keyed on the sets a workbook references
+    rather than the rows it contains, so the result is bounded by how
+    many sets a collection spans -- a handful in practice -- and not by
+    how large the upload is.
+
+    The number is compared exactly, with no case folding, matching the
+    SQL this replaced. Callers must key with the output of
+    ``_coerce_number_to_text`` or matches will be silently lost.
+    """
+    if not set_ids:
+        # No resolvable sets means no card can match. Skipping the query
+        # also avoids handing Postgres an empty array.
+        return {}
+    rows = db.execute(
+        text(
+            """
+            SELECT id, set_id, number FROM cards
+            WHERE set_id = ANY(:set_ids)
+            """
+        ),
+        {"set_ids": sorted(set_ids)},
+    ).fetchall()
+    return {(row.set_id, row.number): row.id for row in rows}
+
+
 def _validate_one(
     row: dict[str, Any],
     row_number: int,
     set_lookup: dict[str, str],
-    db: Session,
+    card_lookup: dict[tuple[str, str], str],
 ) -> tuple[ParsedCollectionRow | None, list[RowError]]:
     """Validate one workbook row and return either the parsed row or errors."""
     errors: list[RowError] = []
@@ -215,7 +276,10 @@ def _validate_one(
     # Card resolution requires both a set and a card number to have validated.
     card_id: str | None = None
     if set_id is not None and card_number_text is not None:
-        card_id = _resolve_card_id(db, set_id, card_number_text)
+        # Dict read, not a query. The key must be the canonical set_id
+        # paired with the coerced number -- the same values the previous
+        # SQL compared against, matched exactly and case-sensitively.
+        card_id = card_lookup.get((set_id, card_number_text))
         if card_id is None:
             errors.append(
                 RowError(
@@ -341,17 +405,3 @@ def _coerce_int(value: Any) -> int | None:
     if as_float.is_integer():
         return int(as_float)
     return None
-
-
-def _resolve_card_id(db: Session, set_id: str, card_number: str) -> str | None:
-    row = db.execute(
-        text(
-            """
-            SELECT id FROM cards
-            WHERE set_id = :set_id AND number = :number
-            LIMIT 1
-            """
-        ),
-        {"set_id": set_id, "number": card_number},
-    ).fetchone()
-    return row[0] if row else None

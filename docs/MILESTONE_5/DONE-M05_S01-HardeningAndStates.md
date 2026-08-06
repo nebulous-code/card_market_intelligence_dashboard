@@ -183,10 +183,7 @@ That means the practical ceiling is set by how far the API sits from the databas
 
 From a developer machine it will not be — the round trip measured 43.5 ms from here, so a 2,000-row upload takes around 96 seconds locally. That is an artifact of the developer's distance from `us-east-1`, not a production limit, and it now completes rather than timing out because uploads carry their own 120-second budget.
 
-Two follow-ups worth their own stories:
-
-- **`cards` has no index on `(set_id, number)`.** The lookup is a sequential scan today, which is invisible at 87 rows but becomes real work as sets are ingested. Cheap to add, and it prevents a latency problem from quietly becoming a CPU problem.
-- **Batching the lookup into a single query** would collapse 2,000 round trips into one and remove the ceiling entirely. It is a behavioural change to the validator rather than hardening, which is why it is not here.
+Both follow-ups this raised were done in [M05_S02](./M05_S02-BatchedCardLookup.md): the lookup is now a single batched query, and `cards` gained a composite index on `(set_id, number)`. A 1,000-row upload went from 48 seconds to under one, and the row cap became a product decision rather than a technical ceiling.
 
 **`read_capped` cannot prevent a large body being received**, because FastAPI awaits `request.form()` before resolving dependencies — Starlette has already spooled the body before any handler code runs. This surfaced in testing as a real defect: a large file uploaded from a browser timed out at 15 seconds and reported "the server took too long to respond", hiding the 413 the server was about to send.
 

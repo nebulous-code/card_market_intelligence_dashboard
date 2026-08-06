@@ -12,7 +12,7 @@ that trends can be analyzed over time in later milestones.
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Integer, Numeric, Text, func
+from sqlalchemy import Date, ForeignKey, Index, Integer, Numeric, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -47,6 +47,13 @@ class Card(Base):
     """
 
     __tablename__ = "cards"
+
+    # Mirrors migration 013. Postgres does not index a foreign key
+    # column automatically, so without this every set-scoped query is a
+    # sequential scan -- and the collection validator resolves an
+    # uploaded row on the pair together. Declared here so Base.metadata
+    # stays in step with the live schema.
+    __table_args__ = (Index("idx_cards_set_number", "set_id", "number"),)
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     set_id: Mapped[str] = mapped_column(Text, ForeignKey("sets.id"), nullable=False)

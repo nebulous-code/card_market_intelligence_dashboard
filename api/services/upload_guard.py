@@ -14,9 +14,9 @@ levers:
    it on open. Real workbooks in this project sit around a 4x ratio; a
    crafted bomb is thousands of x, so a payload small enough to pass a
    byte cap can still exhaust memory once opened.
-3. **Row count.** ``collection_validator._resolve_card_id`` issues one
-   database query per row, so a tall sheet is a database denial of
-   service at a trivial file size. Bytes alone will not catch it.
+3. **Row count.** Every row is parsed and validated, and openpyxl's
+   in-memory model is what that costs. Bytes alone will not catch a
+   sheet that is small on disk but very tall.
 
 Each lever gets its own check, and every limit is environment
 overridable so it can be tightened in production without a deploy of
@@ -234,14 +234,17 @@ def check_row_count(row_count: int) -> None:
     the one-query-per-row path in ``collection_validator`` is never
     entered for an oversized sheet.
 
-    Where the cap comes from: validation issues one card lookup per row,
-    and measured against Neon that costs essentially nothing to execute
-    (0.04 ms) but a full network round trip to reach. So upload time is
-    round trips times rows, and the ceiling that matters is the
-    frontend's 15-second request timeout rather than anything about the
-    database. 2,000 rows is a very large personal collection and stays
-    inside that budget whenever the API and database sit in the same
-    region.
+    Where the cap comes from: it is a deliberate product limit, not a
+    technical ceiling. It originally tracked a real constraint --
+    validation ran one card lookup per row, which made upload time a
+    function of network round trips -- but that lookup is now batched
+    into a single query, and a 1,000-row upload went from 48 seconds to
+    under one. What remains is openpyxl's memory, already bounded by
+    MAX_UNCOMPRESSED_BYTES at roughly 20,000 rows.
+
+    So 2,000 is a choice about what this app is for: a personal
+    collection, not a dealer's inventory. Raise it if that changes --
+    nothing technical is holding it here.
 
     The count comes from ``sheet.max_row``, which is the sheet's *used
     range* rather than its populated rows. Excel routinely leaves a

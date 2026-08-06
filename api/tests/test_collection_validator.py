@@ -376,3 +376,128 @@ def test_coerce_int_decimal_string():
     from services.collection_validator import _coerce_int
 
     assert _coerce_int("3.5") is None
+
+
+# ---------------------------------------------------------------------------
+# Batched card resolution
+#
+# Card lookup used to run one query per row. It is now two prefetches
+# before the loop, so the pieces below are testable without a workbook --
+# and _validate_one is testable without a database at all.
+# ---------------------------------------------------------------------------
+
+
+def test_build_card_lookup_maps_set_and_number_to_id(db_session, sample_cards):
+    from services.collection_validator import _build_card_lookup
+
+    lookup = _build_card_lookup(db_session, {"base1"})
+    assert lookup[("base1", "4")] == "base1-4"
+    assert lookup[("base1", "58")] == "base1-58"
+
+
+def test_build_card_lookup_skips_the_query_for_no_sets(db_session):
+    """No resolvable set means no card can match, and an empty array is
+    a shape Postgres should never be handed."""
+    from services.collection_validator import _build_card_lookup
+
+    assert _build_card_lookup(db_session, set()) == {}
+
+
+def test_build_card_lookup_returns_only_requested_sets(db_session, sample_cards):
+    """The query is keyed on sets referenced, not rows uploaded -- so a
+    workbook touching one set must not pull the whole cards table."""
+    from services.collection_validator import _build_card_lookup
+
+    lookup = _build_card_lookup(db_session, {"base1"})
+    assert {set_id for set_id, _ in lookup} == {"base1"}
+
+
+def test_build_card_lookup_keys_are_case_sensitive(db_session, sample_set):
+    """Matching mirrors the SQL it replaced: exact, no case folding.
+    Alphanumeric numbers like SV01 are why the column is text."""
+    from models.card import Card
+    from services.collection_validator import _build_card_lookup
+
+    db_session.add(
+        Card(id="base1-SV01", set_id="base1", name="Secret", number="SV01", rarity="rare")
+    )
+    db_session.flush()
+
+    lookup = _build_card_lookup(db_session, {"base1"})
+    assert lookup[("base1", "SV01")] == "base1-SV01"
+    assert ("base1", "sv01") not in lookup
+
+
+def test_validate_one_resolves_from_the_lookup_without_a_session():
+    """_validate_one no longer takes a Session -- it only reads dicts,
+    which is what makes this test possible at all."""
+    from services.collection_validator import _validate_one
+
+    parsed, errors = _validate_one(
+        _valid_row(),
+        2,
+        {"base set": "base1"},
+        {("base1", "4"): "base1-4"},
+    )
+    assert errors == []
+    assert parsed.card_id == "base1-4"
+
+
+def test_validate_one_reports_a_miss_against_the_raw_set_label():
+    """The message interpolates the coerced number but the user's own
+    label, so it reads back the way they typed it."""
+    from services.collection_validator import _validate_one
+
+    parsed, errors = _validate_one(
+        _valid_row(**{"Card Number": 999}),
+        7,
+        {"base set": "base1"},
+        {("base1", "4"): "base1-4"},
+    )
+    assert parsed is None
+    assert errors[0].row_number == 7
+    assert errors[0].message == "Card number 999 does not exist in Base Set"
+
+
+def test_workbook_spanning_two_sets_resolves_both(db_session, sample_cards):
+    """One prefetch has to cover every set the workbook touches. Nothing
+    else in the suite uploads rows from more than one set."""
+    from models.card import Card
+    from models.set import Set
+    from datetime import date
+
+    db_session.add(
+        Set(
+            id="base2",
+            name="Jungle",
+            series="Base",
+            printed_total=64,
+            release_date=date(1999, 6, 16),
+        )
+    )
+    db_session.add(
+        Card(id="base2-7", set_id="base2", name="Flareon", number="7", rarity="rare")
+    )
+    db_session.flush()
+
+    blob = _build_workbook(
+        rows=[_valid_row(), _valid_row(**{"Set": "Jungle", "Card Number": 7})]
+    )
+    result = validate_workbook(blob, db_session)
+
+    assert not result.has_errors
+    assert [r.card_id for r in result.parsed_rows] == ["base1-4", "base2-7"]
+
+
+def test_workbook_with_no_resolvable_sets_still_reports_per_row(db_session, sample_cards):
+    """Exercises the empty-prefetch path end to end: every label fails to
+    resolve, so no cards are fetched, and each row must still get its own
+    set error rather than a card error."""
+    blob = _build_workbook(
+        rows=[_valid_row(**{"Set": "Nonsense"}), _valid_row(**{"Set": "Also Nonsense"})]
+    )
+    result = validate_workbook(blob, db_session)
+
+    assert result.total_rows == 2
+    assert len(result.row_errors) == 2
+    assert all("is not recognized" in e.message for e in result.row_errors)
