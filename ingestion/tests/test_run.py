@@ -44,7 +44,11 @@ def _patch_db_session(mocker, run_module, sets):
     mocker.patch.object(run_module, "get_all_sets", return_value=sets)
 
 
-def test_main_no_sets_exits_zero(monkeypatch, mocker, caplog):
+def test_main_no_sets_fails_loudly(monkeypatch, mocker, caplog):
+    """Used to exit 0 -- and to do so *before* the summary block, so the
+    job went green while the notification fell back to the "script
+    crashed" default. An empty database is a failure and should look
+    like one."""
     import logging
 
     import run
@@ -52,11 +56,13 @@ def test_main_no_sets_exits_zero(monkeypatch, mocker, caplog):
     monkeypatch.setattr(sys, "argv", ["run.py"])
     _patch_db_session(mocker, run, sets=[])
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.INFO):
         with pytest.raises(SystemExit) as exc:
             run.main()
-    assert exc.value.code == 0
+    assert exc.value.code == 1
     assert "No sets found" in caplog.text
+    # The summary must still be produced -- that is what feeds the email.
+    assert "no sets in database" in caplog.text.lower()
 
 
 def test_main_processes_sets_end_to_end(monkeypatch, mocker, caplog):
@@ -100,7 +106,9 @@ def test_main_skips_unresolved_set(monkeypatch, mocker, caplog):
     )
 
     with caplog.at_level(logging.ERROR):
-        run.main()
+        with pytest.raises(SystemExit) as exc:
+            run.main()
+    assert exc.value.code == 1
     assert "missing" in caplog.text
 
 
@@ -118,7 +126,9 @@ def test_main_handles_fetch_failure(monkeypatch, mocker, caplog):
     mocker.patch.object(run, "fetch_prices", side_effect=RuntimeError("network"))
 
     with caplog.at_level(logging.ERROR):
-        run.main()
+        with pytest.raises(SystemExit) as exc:
+            run.main()
+    assert exc.value.code == 1
     assert "Failed to fetch prices" in caplog.text
 
 
@@ -136,7 +146,9 @@ def test_main_handles_empty_ppt_response(monkeypatch, mocker, caplog):
     mocker.patch.object(run, "fetch_prices", return_value=([], 100, 0))
 
     with caplog.at_level(logging.WARNING):
-        run.main()
+        with pytest.raises(SystemExit) as exc:
+            run.main()
+    assert exc.value.code == 1
     assert "No price data returned" in caplog.text
 
 
@@ -155,7 +167,9 @@ def test_main_handles_insert_failure(monkeypatch, mocker, caplog):
     mocker.patch.object(run, "insert_price_snapshots", side_effect=RuntimeError("bad insert"))
 
     with caplog.at_level(logging.ERROR):
-        run.main()
+        with pytest.raises(SystemExit) as exc:
+            run.main()
+    assert exc.value.code == 1
     assert "Failed to insert snapshots" in caplog.text
 
 
@@ -310,11 +324,15 @@ def test_main_summary_status_paths(monkeypatch, mocker):
     mocker.patch.object(run, "insert_price_snapshots", return_value=_make_stats(errors=1))
     mocker.patch.object(run, "set_watermark")
     mocker.patch.object(run, "credits_exhausted", return_value=False)
-    run.main()  # asserts no exception
+    # Card-level errors now fail the job rather than returning cleanly --
+    # a green run that wrote nothing was the whole problem.
+    with pytest.raises(SystemExit) as exc:
+        run.main()
+    assert exc.value.code == 1
 
     # Warnings path: set up fresh mocks so we can swap in the warnings stats.
     mocker.patch.object(run, "insert_price_snapshots", return_value=_make_stats(skipped=1, skipped_cards=[("c1", "X", "no match")]))
-    run.main()
+    run.main()  # warnings are not fatal
 
 
 def test_format_unknowns_empty_returns_none_marker():
