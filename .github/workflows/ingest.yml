@@ -8,12 +8,18 @@
 #   DATABASE_URL                    -- Neon connection string
 #   POKEMON_PRICE_TRACKER_API_KEY   -- PokemonPriceTracker API key
 #
-# Optional secrets (defaults to free-tier behaviour if not set):
-#   PPT_INCLUDE_HISTORY             -- "true" to request price history (API tier)
-#   PPT_HISTORY_DAYS                -- number of history days (default 7)
-#   PPT_INCLUDE_EBAY                -- "true" to request eBay graded prices (API tier)
-#
-# Optional variables (set in repo Settings > Variables, not Secrets):
+# Optional variables (Settings > Variables, NOT Secrets -- these are
+# tuning knobs, not credentials, and being able to read them back is
+# useful. Defaults below give free-tier behaviour):
+#   PPT_INCLUDE_HISTORY             -- "true" to request price history (API tier).
+#                                      Costs +1 credit/card but is the ONLY source
+#                                      of per-condition prices (LP/MP/HP/DMG) --
+#                                      without it every snapshot is Near Mint only
+#                                      and the condition multipliers go stale.
+#   PPT_HISTORY_DAYS                -- days of history to request (default 7).
+#                                      Free tier caps at 3, API tier at 180.
+#   PPT_INCLUDE_EBAY                -- "true" to request eBay graded prices (API tier).
+#                                      Costs a further +1 credit/card.
 #   PPT_MAX_CARDS                   -- cap cards fetched per run to reserve daytime credits.
 #                                      Unset (or 0) means no cap (full nightly run).
 #
@@ -79,9 +85,9 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           POKEMON_PRICE_TRACKER_API_KEY: ${{ secrets.POKEMON_PRICE_TRACKER_API_KEY }}
           # These default to "false" if the secret is not set, giving free-tier behaviour.
-          PPT_INCLUDE_HISTORY: ${{ secrets.PPT_INCLUDE_HISTORY || 'false' }}
-          PPT_HISTORY_DAYS: ${{ secrets.PPT_HISTORY_DAYS || '7' }}
-          PPT_INCLUDE_EBAY: ${{ secrets.PPT_INCLUDE_EBAY || 'false' }}
+          PPT_INCLUDE_HISTORY: ${{ vars.PPT_INCLUDE_HISTORY || 'false' }}
+          PPT_HISTORY_DAYS: ${{ vars.PPT_HISTORY_DAYS || '7' }}
+          PPT_INCLUDE_EBAY: ${{ vars.PPT_INCLUDE_EBAY || 'false' }}
           # Cap cards per run to reserve daytime credits for testing.
           # Set this in repo Settings > Variables (not Secrets) to a number like 50.
           # Leave unset or set to 0 for a full uncapped run.
