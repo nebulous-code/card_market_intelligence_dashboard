@@ -303,13 +303,31 @@ def patched_engine(db_session, monkeypatch):
     yield connection
 
 
+def _mark_priced(db_session, set_id):
+    """Give a set the ('ppt','name') mapping that marks it as one we pay for.
+
+    refresh_all_sets only walks priced sets -- the catalogue holds ~200 we
+    do not price, and refreshing those writes zero rows while flooding the
+    summary with cards whose rarity is NULL by design.
+    """
+    db_session.execute(
+        text(
+            "INSERT INTO set_identifiers (set_id, source, identifier, identifier_type) "
+            "VALUES (:sid, 'ppt', :sid, 'name') ON CONFLICT DO NOTHING"
+        ),
+        {"sid": set_id},
+    )
+
+
 def test_refresh_all_sets_processes_every_set(db_session, patched_engine):
     from refresh_multipliers import refresh_all_sets
 
     _seed_set_with_cards(db_session, "ras_a", [])
     _seed_priceable_card(db_session, "ras_a", "ras_a-1")
+    _mark_priced(db_session, "ras_a")
     _seed_set_with_cards(db_session, "ras_b", [])
     _seed_priceable_card(db_session, "ras_b", "ras_b-1")
+    _mark_priced(db_session, "ras_b")
 
     stats = refresh_all_sets()
     assert stats["sets_processed"] >= 2
@@ -324,8 +342,10 @@ def test_refresh_all_sets_continues_after_one_set_fails(db_session, patched_engi
 
     _seed_set_with_cards(db_session, "ras_c", [])
     _seed_priceable_card(db_session, "ras_c", "ras_c-1")
+    _mark_priced(db_session, "ras_c")
     _seed_set_with_cards(db_session, "ras_d", [])
     _seed_priceable_card(db_session, "ras_d", "ras_d-1")
+    _mark_priced(db_session, "ras_d")
 
     real_refresh = refresh_multipliers.refresh_set
     call_count = {"n": 0}
@@ -361,3 +381,24 @@ def test_get_engine_caches_instance(monkeypatch):
     # used in the helpers we exercise.
     assert isinstance(date(2024, 1, 1), date)
     assert isinstance(datetime(2024, 1, 1), datetime)
+
+
+def test_refresh_all_sets_skips_unpriced_sets(db_session, patched_engine):
+    """A catalogued set we do not pay for must not be walked at all.
+
+    Its cards have NULL rarity by design (identity-only ingestion), so
+    processing it writes nothing and reports every card as an ungrouped
+    warning -- which is how the summary grew large enough to break the
+    workflow's environment.
+    """
+    from refresh_multipliers import refresh_all_sets
+
+    _seed_set_with_cards(db_session, "ras_unpriced", [])
+    _seed_priceable_card(db_session, "ras_unpriced", "ras_unpriced-1")
+    # deliberately NOT marked priced
+
+    stats = refresh_all_sets()
+    assert "ras_unpriced" not in [sid for sid, _ in stats["failed_sets"]]
+    assert not any(
+        w["set_id"] == "ras_unpriced" for w in stats["ungrouped_warnings"]
+    )

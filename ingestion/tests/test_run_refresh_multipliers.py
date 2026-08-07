@@ -133,3 +133,37 @@ def test_main_writes_github_env(monkeypatch, mocker, tmp_path):
     contents = github_env.read_text(encoding="utf-8")
     assert "MULTIPLIER_STATUS=Success" in contents
     assert "MULTIPLIER_SUMMARY<<EOF" in contents
+
+
+def test_ungrouped_summary_is_capped():
+    """An unbounded list here is fatal, not merely unreadable.
+
+    The summary goes into GITHUB_ENV, which every later step inherits. The
+    environment counts against the kernel's argv+env limit, so a list of
+    ~20,000 cards made it impossible to spawn any further process --
+    "Argument list too long" took out the log artifact upload and the
+    summary email, both after the work itself had succeeded.
+    """
+    import run_refresh_multipliers as mod
+
+    warnings = [
+        {"set_id": "s", "card_id": f"c{i}", "name": "N", "missing_field": "rarity"}
+        for i in range(20000)
+    ]
+    out = mod._format_ungrouped(warnings)
+
+    assert len(out.splitlines()) == mod.MAX_UNGROUPED_LISTED + 1
+    assert f"and {20000 - mod.MAX_UNGROUPED_LISTED} more" in out
+    # Comfortably inside any sane environment-size budget.
+    assert len(out) < 8000
+
+
+def test_ungrouped_summary_lists_everything_when_short():
+    import run_refresh_multipliers as mod
+
+    warnings = [
+        {"set_id": "s", "card_id": "c1", "name": "N", "missing_field": "rarity"}
+    ]
+    out = mod._format_ungrouped(warnings)
+    assert out.splitlines() == ["  [s] c1 (N) -- missing rarity"]
+    assert "more" not in out

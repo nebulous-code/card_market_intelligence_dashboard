@@ -42,6 +42,7 @@ from typing import Any
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
+from watermark import get_priced_sets
 
 log = logging.getLogger(__name__)
 
@@ -348,11 +349,16 @@ def refresh_all_sets() -> dict[str, Any]:
     engine = _get_engine()
 
     # Pull set list outside any per-set transaction.
+    #
+    # Priced sets only. Since the catalogue ingest landed, the sets table
+    # holds every set TCGdex publishes -- around 203 -- and the ~200 we do
+    # not price have no snapshots to derive a multiplier from. Refreshing
+    # them is pure waste that writes zero rows, and every one of their cards
+    # lands in ungrouped_warnings because identity-only ingestion leaves
+    # rarity and supertype NULL by design. That is not a data fault to
+    # report; it is the intended state for a set we do not pay for.
     with Session(engine) as session:
-        set_ids = [
-            row.id
-            for row in session.execute(text("SELECT id FROM sets ORDER BY id")).fetchall()
-        ]
+        set_ids = [row["id"] for row in get_priced_sets(session)]
 
     log.info("Refreshing multipliers for %d set(s)", len(set_ids))
 

@@ -22,6 +22,16 @@ from refresh_multipliers import refresh_all_sets  # noqa: E402
 
 log = logging.getLogger(__name__)
 
+# Cap on how many ungrouped cards the summary names.
+#
+# This summary is written to GITHUB_ENV, which every later step inherits.
+# An unbounded list is not just unreadable -- it is fatal: the environment
+# counts against the kernel's argv+env limit, and once it is exceeded no
+# further process can be spawned at all. A run that listed ~20,000 cards
+# took out the price ingest, the log artifact upload, and the summary email
+# with "Argument list too long", all of them after the work had succeeded.
+MAX_UNGROUPED_LISTED = 50
+
 
 def _format_ungrouped(warnings: list[dict]) -> str:
     """Render the ungrouped-card warnings as a copy-pasteable list.
@@ -32,10 +42,17 @@ def _format_ungrouped(warnings: list[dict]) -> str:
     """
     if not warnings:
         return "  (none)"
-    return "\n".join(
+
+    lines = [
         f"  [{w['set_id']}] {w['card_id']} ({w['name']}) -- missing {w['missing_field']}"
-        for w in warnings
-    )
+        for w in warnings[:MAX_UNGROUPED_LISTED]
+    ]
+    if len(warnings) > MAX_UNGROUPED_LISTED:
+        lines.append(
+            f"  ... and {len(warnings) - MAX_UNGROUPED_LISTED} more "
+            f"(full detail is in the run log artifact)"
+        )
+    return "\n".join(lines)
 
 
 def _format_failed(failed: list[tuple[str, str]]) -> str:
