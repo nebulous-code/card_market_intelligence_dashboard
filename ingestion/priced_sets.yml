@@ -4,37 +4,536 @@
 # TCGdex publishes into the database so uploads can be validated against
 # real sets; this file decides which of those we actually buy prices for.
 #
-# Adding an entry makes tonight's run price that set. Removing one stops
-# future refreshes but KEEPS the price history already collected -- the set
-# still counts as covered and its data simply stops advancing. Deleting
-# months of snapshots because a line was removed from a config file would be
-# a wildly disproportionate amount of destruction for a small edit.
+# TO ADD A SET: uncomment its two lines below. Commit, and the next nightly
+# run picks it up. Then backfill its rarity so condition multipliers work:
+#
+#     cd ingestion
+#     DATABASE_URL="<prod>" uv run python run_ingest.py --set-id <set_id>
+#
+# TO REMOVE A SET: comment it out again. That stops future refreshes but
+# KEEPS the price history already collected -- the set still counts as
+# covered and its data simply stops advancing. Deleting months of snapshots
+# because a line was commented out would be a wildly disproportionate amount
+# of destruction for a small edit.
 #
 # Fields:
-#   set_id     Canonical set id. Must match sets.id, which is the TCGdex id.
-#              A set that is not in the catalogue yet is reported and skipped,
-#              not treated as an error -- it will resolve after the next
-#              catalogue ingest. If it keeps appearing, the id is a typo.
-#   ppt_name   The exact display name PokemonPriceTracker uses. Verify it
-#              before adding: a wrong name here is not an error, it is a
-#              silent zero-result fetch that looks like a set with no prices.
-#   tcgdex_id  Optional. Defaults to set_id, which is correct for every set
-#              so far. Only needed if the two ever diverge.
+#   set_id     Canonical set id, matching sets.id (which is the TCGdex id).
+#   ppt_name   The exact display name PokemonPriceTracker uses. A wrong name
+#              is not an error -- it is a silent zero-result fetch that looks
+#              identical to a set we have no data for.
+#   tcgdex_id  Optional, defaults to set_id. Not needed for any set so far.
 #
-# The sync writes ('ppt', 'name') and ('tcgdex', 'id') rows into
-# set_identifiers. It deliberately does not touch ('tcgdex', 'name') rows --
-# those are hand-written operator aliases that let you run an ingest by
-# typing a friendly name, and they are not derivable from this file.
+# Every name below was verified against the live PokemonPriceTracker API.
+# To check a name yourself: tools/check_ppt_set.sh "Some Set Name"
+#
+# Credit budget is 20,000/day at 2 credits per card per night. The active
+# list below currently costs roughly 870.
 
 sets:
+  # ---- ACTIVE ----
   - set_id: base1
-    ppt_name: Base Set
+    ppt_name: Base Set    # 102 cards, ~204 credits/night
 
   - set_id: base2
-    ppt_name: Jungle
+    ppt_name: Jungle    # 64 cards, ~128 credits/night
 
   - set_id: base3
-    ppt_name: Fossil
+    ppt_name: Fossil    # 62 cards, ~124 credits/night
 
   - set_id: sv03.5
-    ppt_name: "SV: Scarlet & Violet 151"
+    ppt_name: "SV: Scarlet & Violet 151"    # 165 cards, ~330 credits/night
+
+  # ---- AVAILABLE ON POKEMONPRICETRACKER ----
+  #
+  # Every name here returned data when probed. Uncomment to start pricing.
+
+  # -- 2000 --
+  # - set_id: jumbo
+  #   ppt_name: Jumbo cards    # 160 cards, ~320 credits/night
+  - set_id: base4
+    ppt_name: Base Set 2    # 130 cards, ~260 credits/night
+  - set_id: base5
+    ppt_name: Team Rocket    # 82 cards, ~164 credits/night
+  - set_id: gym1
+    ppt_name: Gym Heroes    # 132 cards, ~264 credits/night
+  - set_id: gym2
+    ppt_name: Gym Challenge    # 132 cards, ~264 credits/night
+  - set_id: neo1
+    ppt_name: Neo Genesis    # 111 cards, ~222 credits/night
+
+  # -- 2001 --
+  - set_id: neo2
+    ppt_name: Neo Discovery    # 75 cards, ~150 credits/night
+  - set_id: si1
+    ppt_name: Southern Islands    # 18 cards, ~36 credits/night
+  - set_id: neo3
+    ppt_name: Neo Revelation    # 64 cards, ~128 credits/night
+
+  # -- 2002 --
+  - set_id: neo4
+    ppt_name: Neo Destiny    # 105 cards, ~210 credits/night
+  - set_id: lc
+    ppt_name: Legendary Collection    # 110 cards, ~220 credits/night
+  - set_id: sp
+    ppt_name: Sample    # 10 cards, ~20 credits/night
+
+  # -- 2003 --
+  - set_id: ecard2
+    ppt_name: Aquapolis    # 147 cards, ~294 credits/night
+  - set_id: ecard3
+    ppt_name: Skyridge    # 144 cards, ~288 credits/night
+  - set_id: ex1
+    ppt_name: Ruby and Sapphire    # 109 cards, ~218 credits/night
+  - set_id: ex2
+    ppt_name: Sandstorm    # 100 cards, ~200 credits/night
+  - set_id: ex3
+    ppt_name: Dragon    # 97 cards, ~194 credits/night
+
+  # -- 2004 --
+  # - set_id: ex4
+  #   ppt_name: Team Magma vs Team Aqua    # 95 cards, ~190 credits/night
+  # - set_id: ex5
+  #   ppt_name: Hidden Legends    # 101 cards, ~202 credits/night
+  # - set_id: ex6
+  #   ppt_name: "FireRed & LeafGreen"    # 112 cards, ~224 credits/night
+  # - set_id: pop1
+  #   ppt_name: POP Series 1    # 17 cards, ~34 credits/night
+  # - set_id: ex7
+  #   ppt_name: Team Rocket Returns    # 109 cards, ~218 credits/night
+
+  # -- 2005 --
+  # - set_id: ex8
+  #   ppt_name: Deoxys    # 107 cards, ~214 credits/night
+  # - set_id: ex9
+  #   ppt_name: Emerald    # 106 cards, ~212 credits/night
+  # - set_id: pop2
+  #   ppt_name: POP Series 2    # 17 cards, ~34 credits/night
+  # - set_id: ex10
+  #   ppt_name: Unseen Forces    # 115 cards, ~230 credits/night
+  # - set_id: ex11
+  #   ppt_name: Delta Species    # 113 cards, ~226 credits/night
+
+  # -- 2006 --
+  # - set_id: ex12
+  #   ppt_name: Legend Maker    # 92 cards, ~184 credits/night
+  # - set_id: pop3
+  #   ppt_name: POP Series 3    # 17 cards, ~34 credits/night
+  # - set_id: ex13
+  #   ppt_name: Holon Phantoms    # 110 cards, ~220 credits/night
+  # - set_id: pop4
+  #   ppt_name: POP Series 4    # 17 cards, ~34 credits/night
+  # - set_id: ex14
+  #   ppt_name: Crystal Guardians    # 100 cards, ~200 credits/night
+  # - set_id: ex15
+  #   ppt_name: Dragon Frontiers    # 101 cards, ~202 credits/night
+
+  # -- 2007 --
+  # - set_id: ex16
+  #   ppt_name: Power Keepers    # 108 cards, ~216 credits/night
+  # - set_id: pop5
+  #   ppt_name: POP Series 5    # 17 cards, ~34 credits/night
+  # - set_id: dp1
+  #   ppt_name: Diamond and Pearl    # 130 cards, ~260 credits/night
+  # - set_id: dp2
+  #   ppt_name: Mysterious Treasures    # 123 cards, ~246 credits/night
+  # - set_id: pop6
+  #   ppt_name: POP Series 6    # 17 cards, ~34 credits/night
+  # - set_id: dp3
+  #   ppt_name: Secret Wonders    # 132 cards, ~264 credits/night
+
+  # -- 2008 --
+  # - set_id: dp4
+  #   ppt_name: Great Encounters    # 106 cards, ~212 credits/night
+  # - set_id: pop7
+  #   ppt_name: POP Series 7    # 17 cards, ~34 credits/night
+  # - set_id: dp5
+  #   ppt_name: Majestic Dawn    # 100 cards, ~200 credits/night
+
+  # -- 2011 --
+  # - set_id: bw1
+  #   ppt_name: Black and White    # 114 cards, ~228 credits/night
+
+  # -- 2022 --
+  # - set_id: swsh10.5
+  #   ppt_name: Pokemon GO    # 78 cards, ~156 credits/night
+  # - set_id: swsh12
+  #   ppt_name: Silver Tempest    # 195 cards, ~390 credits/night
+  # - set_id: swsh12.5tg
+  #   ppt_name: Silver Tempest Trainer Gallery    # 30 cards, ~60 credits/night
+
+  # -- 2023 --
+  # - set_id: swsh12.5
+  #   ppt_name: Crown Zenith    # 159 cards, ~318 credits/night
+  # - set_id: sv01
+  #   ppt_name: "Scarlet & Violet"    # 198 cards, ~396 credits/night
+  # - set_id: sv02
+  #   ppt_name: Paldea Evolved    # 193 cards, ~386 credits/night
+  # - set_id: sv03
+  #   ppt_name: Obsidian Flames    # 197 cards, ~394 credits/night
+  # - set_id: mfb
+  #   ppt_name: My First Battle    # 48 cards, ~96 credits/night
+  # - set_id: sv04
+  #   ppt_name: Paradox Rift    # 182 cards, ~364 credits/night
+
+  # -- 2024 --
+  # - set_id: sv04.5
+  #   ppt_name: Paldean Fates    # 91 cards, ~182 credits/night
+  # - set_id: sv05
+  #   ppt_name: Temporal Forces    # 162 cards, ~324 credits/night
+  # - set_id: sv06
+  #   ppt_name: Twilight Masquerade    # 167 cards, ~334 credits/night
+  # - set_id: sv06.5
+  #   ppt_name: Shrouded Fable    # 64 cards, ~128 credits/night
+  # - set_id: sv07
+  #   ppt_name: Stellar Crown    # 142 cards, ~284 credits/night
+  # - set_id: sv08
+  #   ppt_name: Surging Sparks    # 191 cards, ~382 credits/night
+
+  # -- 2025 --
+  # - set_id: sv08.5
+  #   ppt_name: Prismatic Evolutions    # 131 cards, ~262 credits/night
+  # - set_id: sv09
+  #   ppt_name: Journey Together    # 159 cards, ~318 credits/night
+  # - set_id: sv10
+  #   ppt_name: Destined Rivals    # 182 cards, ~364 credits/night
+  # - set_id: sv10.5b
+  #   ppt_name: Black Bolt    # 86 cards, ~172 credits/night
+  # - set_id: sv10.5w
+  #   ppt_name: White Flare    # 86 cards, ~172 credits/night
+  # - set_id: me01
+  #   ppt_name: Mega Evolution    # 132 cards, ~264 credits/night
+  # - set_id: me02
+  #   ppt_name: Phantasmal Flames    # 94 cards, ~188 credits/night
+
+  # -- 2026 --
+  # - set_id: me02.5
+  #   ppt_name: Ascended Heroes    # 217 cards, ~434 credits/night
+  # - set_id: me03
+  #   ppt_name: Perfect Order    # 88 cards, ~176 credits/night
+  # - set_id: me04
+  #   ppt_name: Chaos Rising    # 86 cards, ~172 credits/night
+  # - set_id: me05
+  #   ppt_name: Pitch Black    # 84 cards, ~168 credits/night
+
+  # ---- NOT FOUND ON POKEMONPRICETRACKER (130 sets) ----
+  #
+  # These are real sets in the catalogue, but PokemonPriceTracker returned
+  # nothing for their TCGdex name. Either it does not carry them, or it
+  # calls them something else. Retries with common variations (& -> and,
+  # accented characters folded) did not help.
+  #
+  # DO NOT simply uncomment these -- the name is unverified, and a wrong one
+  # fails silently. Look the set up on pokemonpricetracker.com, correct the
+  # ppt_name, and confirm with:  tools/check_ppt_set.sh "<name>"
+
+  # -- 1996 --
+  # - set_id: miscp
+  #   ppt_name: Miscellaneous Promos    # UNVERIFIED -- 1 cards
+
+  # -- 1999 --
+  # - set_id: basep
+  #   ppt_name: Wizards Black Star Promos    # UNVERIFIED -- 53 cards
+  # - set_id: wp
+  #   ppt_name: W Promotional    # UNVERIFIED -- 7 cards
+
+  # -- 2002 --
+  # - set_id: ecard1
+  #   ppt_name: Expedition Base Set    # UNVERIFIED -- 165 cards
+  # - set_id: bog
+  #   ppt_name: Best of game    # UNVERIFIED -- 9 cards
+
+  # -- 2003 --
+  # - set_id: np
+  #   ppt_name: Nintendo Black Star Promos    # UNVERIFIED -- 40 cards
+
+  # -- 2004 --
+  # - set_id: tk-ex-latia
+  #   ppt_name: EX trainer Kit (Latias)    # UNVERIFIED -- 10 cards
+  # - set_id: tk-ex-latio
+  #   ppt_name: EX trainer Kit (Latios)    # UNVERIFIED -- 10 cards
+  # - set_id: ex5.5
+  #   ppt_name: Poké Card Creator Pack    # UNVERIFIED -- 5 cards
+
+  # -- 2005 --
+  # - set_id: exu
+  #   ppt_name: Unseen Forces Unown Collection    # UNVERIFIED -- 28 cards
+
+  # -- 2006 --
+  # - set_id: tk-ex-m
+  #   ppt_name: EX trainer Kit 2 (Minun)    # UNVERIFIED -- 12 cards
+  # - set_id: tk-ex-p
+  #   ppt_name: EX trainer Kit 2 (Plusle)    # UNVERIFIED -- 12 cards
+
+  # -- 2007 --
+  # - set_id: dpp
+  #   ppt_name: DP Black Star Promos    # UNVERIFIED -- 56 cards
+  # - set_id: tk-dp-l
+  #   ppt_name: DP trainer Kit (Lucario)    # UNVERIFIED -- 11 cards
+  # - set_id: tk-dp-m
+  #   ppt_name: DP trainer Kit (Manaphy)    # UNVERIFIED -- 12 cards
+
+  # -- 2008 --
+  # - set_id: dp6
+  #   ppt_name: Legends Awakened    # UNVERIFIED -- 146 cards
+  # - set_id: pop8
+  #   ppt_name: POP Series 8    # UNVERIFIED -- 17 cards
+  # - set_id: dp7
+  #   ppt_name: Stormfront    # UNVERIFIED -- 100 cards
+
+  # -- 2009 --
+  # - set_id: pl1
+  #   ppt_name: Platinum    # UNVERIFIED -- 127 cards
+  # - set_id: pop9
+  #   ppt_name: POP Series 9    # UNVERIFIED -- 17 cards
+  # - set_id: pl2
+  #   ppt_name: Rising Rivals    # UNVERIFIED -- 111 cards
+  # - set_id: pl3
+  #   ppt_name: Supreme Victors    # UNVERIFIED -- 147 cards
+  # - set_id: pl4
+  #   ppt_name: Arceus    # UNVERIFIED -- 99 cards
+  # - set_id: ru1
+  #   ppt_name: Pokémon Rumble    # UNVERIFIED -- 16 cards
+
+  # -- 2010 --
+  # - set_id: hgss1
+  #   ppt_name: HeartGold SoulSilver    # UNVERIFIED -- 123 cards
+  # - set_id: hgssp
+  #   ppt_name: HGSS Black Star Promos    # UNVERIFIED -- 25 cards
+  # - set_id: tk-hs-g
+  #   ppt_name: HS trainer Kit (Gyarados)    # UNVERIFIED -- 30 cards
+  # - set_id: tk-hs-r
+  #   ppt_name: HS trainer Kit (Raichu)    # UNVERIFIED -- 30 cards
+  # - set_id: hgss2
+  #   ppt_name: Unleashed    # UNVERIFIED -- 95 cards
+  # - set_id: hgss3
+  #   ppt_name: Undaunted    # UNVERIFIED -- 90 cards
+  # - set_id: hgss4
+  #   ppt_name: Triumphant    # UNVERIFIED -- 102 cards
+
+  # -- 2011 --
+  # - set_id: col1
+  #   ppt_name: Call of Legends    # UNVERIFIED -- 95 cards
+  # - set_id: bwp
+  #   ppt_name: BW Black Star Promos    # UNVERIFIED -- 101 cards
+  # - set_id: 2011bw
+  #   ppt_name: "McDonald's Collection 2011"    # UNVERIFIED -- 12 cards
+  # - set_id: bw2
+  #   ppt_name: Emerging Powers    # UNVERIFIED -- 98 cards
+  # - set_id: tk-bw-e
+  #   ppt_name: BW trainer Kit (Excadrill)    # UNVERIFIED -- 30 cards
+  # - set_id: tk-bw-z
+  #   ppt_name: BW trainer Kit (Zoroark)    # UNVERIFIED -- 30 cards
+  # - set_id: bw3
+  #   ppt_name: Noble Victories    # UNVERIFIED -- 101 cards
+
+  # -- 2012 --
+  # - set_id: bw4
+  #   ppt_name: Next Destinies    # UNVERIFIED -- 99 cards
+  # - set_id: bw5
+  #   ppt_name: Dark Explorers    # UNVERIFIED -- 108 cards
+  # - set_id: 2012bw
+  #   ppt_name: "McDonald's Collection 2012"    # UNVERIFIED -- 12 cards
+  # - set_id: bw6
+  #   ppt_name: Dragons Exalted    # UNVERIFIED -- 124 cards
+  # - set_id: dv1
+  #   ppt_name: Dragon Vault    # UNVERIFIED -- 20 cards
+  # - set_id: bw7
+  #   ppt_name: Boundaries Crossed    # UNVERIFIED -- 149 cards
+
+  # -- 2013 --
+  # - set_id: bw8
+  #   ppt_name: Plasma Storm    # UNVERIFIED -- 135 cards
+  # - set_id: bw9
+  #   ppt_name: Plasma Freeze    # UNVERIFIED -- 116 cards
+  # - set_id: bw10
+  #   ppt_name: Plasma Blast    # UNVERIFIED -- 101 cards
+  # - set_id: xyp
+  #   ppt_name: XY Black Star Promos    # UNVERIFIED -- 211 cards
+  # - set_id: bw11
+  #   ppt_name: Legendary Treasures    # UNVERIFIED -- 113 cards
+  # - set_id: rc
+  #   ppt_name: Radiant Collection    # UNVERIFIED -- 25 cards
+  # - set_id: xy0
+  #   ppt_name: Kalos Starter Set    # UNVERIFIED -- 39 cards
+
+  # -- 2014 --
+  # - set_id: xy1
+  #   ppt_name: XY    # UNVERIFIED -- 146 cards
+  # - set_id: xya
+  #   ppt_name: Yellow A Alternate    # UNVERIFIED -- 6 cards
+  # - set_id: tk-xy-n
+  #   ppt_name: XY trainer Kit (Noivern)    # UNVERIFIED -- 30 cards
+  # - set_id: tk-xy-sy
+  #   ppt_name: XY trainer Kit (Sylveon)    # UNVERIFIED -- 30 cards
+  # - set_id: xy2
+  #   ppt_name: Flashfire    # UNVERIFIED -- 106 cards
+  # - set_id: 2014xy
+  #   ppt_name: "McDonald's Collection 2014"    # UNVERIFIED -- 12 cards
+  # - set_id: xy3
+  #   ppt_name: Furious Fists    # UNVERIFIED -- 111 cards
+  # - set_id: tk-xy-b
+  #   ppt_name: XY trainer Kit (Bisharp)    # UNVERIFIED -- 30 cards
+  # - set_id: tk-xy-w
+  #   ppt_name: XY trainer Kit (Wigglytuff)    # UNVERIFIED -- 30 cards
+  # - set_id: xy4
+  #   ppt_name: Phantom Forces    # UNVERIFIED -- 119 cards
+
+  # -- 2015 --
+  # - set_id: xy5
+  #   ppt_name: Primal Clash    # UNVERIFIED -- 160 cards
+  # - set_id: dc1
+  #   ppt_name: Double Crisis    # UNVERIFIED -- 34 cards
+  # - set_id: tk-xy-latia
+  #   ppt_name: XY trainer Kit (Latias)    # UNVERIFIED -- 30 cards
+  # - set_id: tk-xy-latio
+  #   ppt_name: XY trainer Kit (Latios)    # UNVERIFIED -- 30 cards
+  # - set_id: xy6
+  #   ppt_name: Roaring Skies    # UNVERIFIED -- 108 cards
+  # - set_id: xy7
+  #   ppt_name: Ancient Origins    # UNVERIFIED -- 98 cards
+  # - set_id: xy8
+  #   ppt_name: BREAKthrough    # UNVERIFIED -- 162 cards
+  # - set_id: 2015xy
+  #   ppt_name: "McDonald's Collection 2015"    # UNVERIFIED -- 12 cards
+
+  # -- 2016 --
+  # - set_id: xy9
+  #   ppt_name: BREAKpoint    # UNVERIFIED -- 122 cards
+  # - set_id: g1
+  #   ppt_name: Generations    # UNVERIFIED -- 83 cards
+  # - set_id: tk-xy-p
+  #   ppt_name: XY trainer Kit (Pikachu Libre)    # UNVERIFIED -- 30 cards
+  # - set_id: tk-xy-su
+  #   ppt_name: XY trainer Kit (Suicune)    # UNVERIFIED -- 30 cards
+  # - set_id: xy10
+  #   ppt_name: Fates Collide    # UNVERIFIED -- 124 cards
+  # - set_id: xy11
+  #   ppt_name: Steam Siege    # UNVERIFIED -- 114 cards
+  # - set_id: 2016xy
+  #   ppt_name: "McDonald's Collection 2016"    # UNVERIFIED -- 12 cards
+  # - set_id: xy12
+  #   ppt_name: Evolutions    # UNVERIFIED -- 108 cards
+
+  # -- 2017 --
+  # - set_id: smp
+  #   ppt_name: SM Black Star Promos    # UNVERIFIED -- 248 cards
+  # - set_id: sm1
+  #   ppt_name: "Sun & Moon"    # UNVERIFIED -- 149 cards
+  # - set_id: tk-sm-r
+  #   ppt_name: SM trainer Kit (Alolan Raichu)    # UNVERIFIED -- 30 cards
+  # - set_id: tk-sm-l
+  #   ppt_name: SM trainer Kit (Lycanroc)    # UNVERIFIED -- 30 cards
+  # - set_id: sm2
+  #   ppt_name: Guardians Rising    # UNVERIFIED -- 145 cards
+  # - set_id: 2017sm
+  #   ppt_name: "McDonald's Collection 2017"    # UNVERIFIED -- 12 cards
+  # - set_id: sm3
+  #   ppt_name: Burning Shadows    # UNVERIFIED -- 147 cards
+  # - set_id: sm3.5
+  #   ppt_name: Shining Legends    # UNVERIFIED -- 73 cards
+  # - set_id: sm4
+  #   ppt_name: Crimson Invasion    # UNVERIFIED -- 111 cards
+
+  # -- 2018 --
+  # - set_id: sm5
+  #   ppt_name: Ultra Prism    # UNVERIFIED -- 156 cards
+  # - set_id: sm6
+  #   ppt_name: Forbidden Light    # UNVERIFIED -- 131 cards
+  # - set_id: sm7
+  #   ppt_name: Celestial Storm    # UNVERIFIED -- 168 cards
+  # - set_id: sm7.5
+  #   ppt_name: Dragon Majesty    # UNVERIFIED -- 70 cards
+  # - set_id: 2018sm
+  #   ppt_name: "McDonald's Collection 2018"    # UNVERIFIED -- 12 cards
+  # - set_id: sm8
+  #   ppt_name: Lost Thunder    # UNVERIFIED -- 214 cards
+
+  # -- 2019 --
+  # - set_id: sm9
+  #   ppt_name: Team Up    # UNVERIFIED -- 181 cards
+  # - set_id: det1
+  #   ppt_name: Detective Pikachu    # UNVERIFIED -- 18 cards
+  # - set_id: sm10
+  #   ppt_name: Unbroken Bonds    # UNVERIFIED -- 214 cards
+  # - set_id: sm11
+  #   ppt_name: Unified Minds    # UNVERIFIED -- 236 cards
+  # - set_id: sm115
+  #   ppt_name: Hidden Fates    # UNVERIFIED -- 68 cards
+  # - set_id: sma
+  #   ppt_name: Hidden Fates Shiny Vault    # UNVERIFIED -- 94 cards
+  # - set_id: 2019sm
+  #   ppt_name: "McDonald's Collection 2019"    # UNVERIFIED -- 12 cards
+  # - set_id: sm12
+  #   ppt_name: Cosmic Eclipse    # UNVERIFIED -- 236 cards
+  # - set_id: swshp
+  #   ppt_name: SWSH Black Star Promos    # UNVERIFIED -- 307 cards
+
+  # -- 2020 --
+  # - set_id: swsh1
+  #   ppt_name: "Sword & Shield"    # UNVERIFIED -- 202 cards
+  # - set_id: swsh2
+  #   ppt_name: Rebel Clash    # UNVERIFIED -- 192 cards
+  # - set_id: swsh3
+  #   ppt_name: Darkness Ablaze    # UNVERIFIED -- 189 cards
+  # - set_id: fut2020
+  #   ppt_name: Pokémon Futsal 2020    # UNVERIFIED -- 5 cards
+  # - set_id: swsh3.5
+  #   ppt_name: "Champion's Path"    # UNVERIFIED -- 73 cards
+  # - set_id: swsh4
+  #   ppt_name: Vivid Voltage    # UNVERIFIED -- 185 cards
+
+  # -- 2021 --
+  # - set_id: 2021swsh
+  #   ppt_name: "McDonald's Collection 2021"    # UNVERIFIED -- 25 cards
+  # - set_id: swsh4.5
+  #   ppt_name: Shining Fates    # UNVERIFIED -- 72 cards
+  # - set_id: swsh4.5sv
+  #   ppt_name: Shining Fates Shiny Vault    # UNVERIFIED -- 122 cards
+  # - set_id: swsh5
+  #   ppt_name: Battle Styles    # UNVERIFIED -- 163 cards
+  # - set_id: swsh6
+  #   ppt_name: Chilling Reign    # UNVERIFIED -- 198 cards
+  # - set_id: swsh7
+  #   ppt_name: Evolving Skies    # UNVERIFIED -- 203 cards
+  # - set_id: cel25
+  #   ppt_name: Celebrations    # UNVERIFIED -- 25 cards
+  # - set_id: cel25cc
+  #   ppt_name: Celebrations Classic Collection    # UNVERIFIED -- 25 cards
+  # - set_id: swsh8
+  #   ppt_name: Fusion Strike    # UNVERIFIED -- 264 cards
+
+  # -- 2022 --
+  - set_id: swsh9
+    ppt_name: Brilliant Stars    # UNVERIFIED -- 172 cards
+  - set_id: swsh9.5tg
+    ppt_name: Brilliant Stars Trainer Gallery    # UNVERIFIED -- 30 cards
+  - set_id: swsh10
+    ppt_name: Astral Radiance    # UNVERIFIED -- 189 cards
+  - set_id: swsh10.5tg
+    ppt_name: Astral Radiance Trainer Gallery    # UNVERIFIED -- 30 cards
+  - set_id: 2022swsh
+    ppt_name: "McDonald's Collection 2022"    # UNVERIFIED -- 15 cards
+  - set_id: swsh11
+    ppt_name: Lost Origin    # UNVERIFIED -- 196 cards
+  - set_id: swsh11.5tg
+    ppt_name: Lost Origin Trainer Gallery    # UNVERIFIED -- 30 cards
+
+  # -- 2023 --
+  - set_id: swsh12.5gg
+    ppt_name: Crown Zenith Galarian Gallery    # UNVERIFIED -- 70 cards
+  - set_id: svp
+    ppt_name: SVP Black Star Promos    # UNVERIFIED -- 225 cards
+  - set_id: sve
+    ppt_name: "Scarlet & Violet Energy"    # UNVERIFIED -- 24 cards
+  - set_id: 2023sv
+    ppt_name: "McDonald's Collection 2023"    # UNVERIFIED -- 15 cards
+
+  # -- 2024 --
+  - set_id: 2024sv
+    ppt_name: "McDonald's Collection 2024"    # UNVERIFIED -- 15 cards
+
+  # -- 2025 --
+  - set_id: mee
+    ppt_name: Mega Evolution Energy    # UNVERIFIED -- 8 cards
+  - set_id: mep
+    ppt_name: MEP Black Star Promos    # UNVERIFIED -- 0 cards
