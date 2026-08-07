@@ -39,7 +39,13 @@
         @click:close="unpricedDismissed = true"
       >
         <div class="font-weight-medium">{{ unpricedSummary.headline }}</div>
-        <div class="text-body-2 mt-1">{{ unpricedSummary.detail }}</div>
+        <div
+          v-for="(line, i) in unpricedSummary.lines"
+          :key="i"
+          class="text-body-2 mt-1"
+        >
+          {{ line }}
+        </div>
       </v-alert>
 
       <CollectionKpis :cards="filteredCards" />
@@ -261,23 +267,74 @@ const unpricedDismissed = ref(false)
 // that rows are missing from the totals entirely, which a set filter would
 // otherwise hide. Quantity-weighted, so three copies of one unpriced card
 // read as three cards rather than one row.
+// Condition codes as the API returns them. The five are fixed by the upload
+// template's validation list, so a local map is proportionate -- the alternative
+// is threading a label through the pricing schema for display text alone.
+const CONDITION_NAMES = {
+  NM: 'Near Mint',
+  LP: 'Lightly Played',
+  MP: 'Moderately Played',
+  HP: 'Heavily Played',
+  DMG: 'Damaged',
+}
+
+// Reason strings as emitted by api/services/pricing_coverage.py.
+const REASON_SET = 'Set not priced yet'
+const REASON_CARD = 'Card not priced yet'
+const REASON_CONDITION = 'Condition not priced yet'
+
+const MAX_NAMED = 5
+
+// Join up to MAX_NAMED names, flagging when the list was cut short. The caller
+// needs to know that separately, because a single trailing clause covers every
+// truncated list rather than repeating per group.
+function nameList(names) {
+  const sorted = [...new Set(names)].sort()
+  if (sorted.length <= MAX_NAMED) {
+    return { text: sorted.join(', '), truncated: false }
+  }
+  return { text: `${sorted.slice(0, MAX_NAMED).join(', ')}, and others`, truncated: true }
+}
+
+// Counts against the whole collection, not the current filter: the point is
+// that rows are missing from the totals entirely, which a set filter would
+// otherwise hide. Quantity-weighted, so three copies of one unpriced card
+// read as three cards rather than one row.
 const unpricedSummary = computed(() => {
   const missing = cards.value.filter((c) => c.price_missing)
   if (missing.length === 0) return null
 
   const count = missing.reduce((n, c) => n + (c.quantity || 1), 0)
-  const names = [...new Set(missing.map((c) => c.set_name))].sort()
-  let named = names.slice(0, 3).join(', ')
-  if (names.length > 3) named += ` and ${names.length - 3} more`
+
+  // Three distinct gaps that must not be described in the same words. Saying
+  // "we do not have pricing for 151" when 151 is priced -- and merely missing
+  // one condition -- contradicts the same page showing a valued card from it.
+  const sets = nameList(
+    missing.filter((c) => c.price_missing_reason === REASON_SET).map((c) => c.set_name),
+  )
+  const cardsOnly = nameList(
+    missing.filter((c) => c.price_missing_reason === REASON_CARD).map((c) => c.card_name),
+  )
+  const conditions = nameList(
+    missing
+      .filter((c) => c.price_missing_reason === REASON_CONDITION)
+      .map((c) => `${c.card_name} in ${CONDITION_NAMES[c.condition] || c.condition}`),
+  )
+
+  const lines = []
+  if (sets.text) lines.push(`We do not have pricing for ${sets.text} yet.`)
+  if (cardsOnly.text) lines.push(`We do not have pricing for ${cardsOnly.text} yet.`)
+  if (conditions.text) lines.push(`We do not have pricing for ${conditions.text} yet.`)
+  if (sets.truncated || cardsOnly.truncated || conditions.truncated) {
+    lines.push('Download Excel and review collection worksheet for a more detailed list.')
+  }
 
   const all = missing.length === cards.value.length
   return {
     headline: all
       ? 'None of these cards can be valued yet'
       : `${count} card${count === 1 ? '' : 's'} are not included in these totals`,
-    detail: all
-      ? `We do not buy price data for ${named} yet. Your card list is still here, and the sets are still real.`
-      : `We do not have pricing for ${named} yet. Everything else is valued as normal.`,
+    lines,
   }
 })
 

@@ -272,6 +272,7 @@ def _collect_historic_rows(
                 condition,
                 captured_date,
                 (variant IS NULL) DESC,
+                variant,
                 captured_at
             """
         ),

@@ -135,25 +135,42 @@ def daily_timeseries(
     history = _fetch_history(
         db,
         card_conditions=[(r.card_id, r.condition) for r in rows],
+        since=start,
     )
     quantities: dict[tuple[str, str], int] = defaultdict(int)
     for r in rows:
         quantities[(r.card_id, r.condition)] += r.quantity
 
-    points: list[TimeseriesPoint] = []
-    current = start
-    while current <= today:
-        total = Decimal("0")
-        for key, snaps in history.items():
-            qty = quantities.get(key)
-            if qty is None:  # pragma: no cover -- history keys derive from quantities
-                continue
-            price = _locf_price(snaps, current)
-            if price is None:  # pragma: no cover -- _fetch_history skips empty keys
-                continue
-            total += price * qty
-        points.append(TimeseriesPoint(date=current.isoformat(), value=total))
-        current += timedelta(days=1)
+    # One forward pass per key rather than a LOCF lookup per key per day.
+    #
+    # Both the days and each key's snapshots are ascending, so a cursor that
+    # only ever moves forward visits each snapshot once. The previous shape
+    # re-scanned a key's entire history for every day in the window: at ~1,000
+    # distinct card/condition keys over 90 days that is tens of millions of
+    # comparisons and took ~30 seconds, past the frontend's 15-second timeout.
+    n_days = (today - start).days + 1
+    totals = [Decimal("0")] * n_days
+    for key, snaps in history.items():
+        qty = quantities.get(key)
+        if qty is None:  # pragma: no cover -- history keys derive from quantities
+            continue
+        # Seed with the earliest known price so a window that opens before
+        # this key's first snapshot starts at a real value, not zero. This
+        # matches _locf_price's fallback.
+        price = snaps[0].market_price
+        idx = 0
+        day = start
+        for i in range(n_days):
+            while idx < len(snaps) and snaps[idx].captured_date <= day:
+                price = snaps[idx].market_price
+                idx += 1
+            totals[i] += price * qty
+            day += timedelta(days=1)
+
+    points = [
+        TimeseriesPoint(date=(start + timedelta(days=i)).isoformat(), value=total)
+        for i, total in enumerate(totals)
+    ]
     return points, earliest
 
 
@@ -179,9 +196,13 @@ def movers(
     else:
         start_date = today - timedelta(days=days - 1)
 
+    # movers reads exactly two dates -- start_date and today -- so anything
+    # older than start_date is dead weight beyond the single carry-in row
+    # _fetch_history keeps for us.
     history = _fetch_history(
         db,
         card_conditions=[(r.card_id, r.condition) for r in rows],
+        since=start_date,
     )
     cards = _fetch_card_metadata(db, sorted({r.card_id for r in rows}))
 
@@ -319,12 +340,23 @@ def _fetch_latest_prices(
 def _fetch_history(
     db: Session,
     card_conditions: Iterable[tuple[str, str]],
+    since: date,
 ) -> dict[tuple[str, str], list[_Snap]]:
     """All snapshots per ``(card_id, condition)``, ordered ASC by date.
 
     Within the same captured_date, keep one row -- prefer the standard
     (NULL) variant, then the earliest captured_at. The result is an
-    ascending-by-date list per key, ready for binary-search LOCF.
+    ascending-by-date list per key, ready for LOCF.
+
+    ``since`` is required, not optional: every caller reads a bounded window,
+    and an unbounded fetch is the difference between a fast chart and a
+    30-second one. It bounds the result to the window the caller will read,
+    plus the single most recent snapshot *before* it per key so that
+    last-observation-carried-forward still has a value to carry in on day
+    one. Without the bound this returns every snapshot ever recorded for
+    every card in the collection: a 2,000-row upload spanning a few hundred
+    cards pulls near a million rows into Python and takes half a minute,
+    almost all of it for dates the caller then ignores.
     """
     keys = list({(c, cond) for c, cond in card_conditions})
     if not keys:  # pragma: no cover -- callers short-circuit on empty rows
@@ -344,15 +376,17 @@ def _fetch_history(
               AND condition = ANY(:conditions)
               AND source = 'tcgplayer'
               AND market_price IS NOT NULL
+              AND captured_date >= CAST(:since AS date)
             ORDER BY
                 card_id,
                 condition,
                 captured_date,
                 (variant IS NULL) DESC,
+                variant,
                 captured_at
             """
         ),
-        {"card_ids": card_ids, "conditions": conditions},
+        {"card_ids": card_ids, "conditions": conditions, "since": since},
     ).fetchall()
 
     by_key: dict[tuple[str, str], list[_Snap]] = defaultdict(list)
@@ -362,6 +396,40 @@ def _fetch_history(
         if key not in keys_set:  # pragma: no cover -- ANY/ANY filter is exact
             continue
         by_key[key].append(_Snap(captured_date=r.captured_date, market_price=r.market_price))
+
+    # The carry-in: one row per key, the latest before the window. A key whose
+    # price last moved months ago has no in-window snapshot at all, and without
+    # this its line would start at the wrong value.
+    carry = db.execute(
+        text(
+            """
+            SELECT DISTINCT ON (card_id, condition)
+                card_id, condition, captured_date, market_price
+            FROM price_snapshots
+            WHERE card_id = ANY(:card_ids)
+              AND condition = ANY(:conditions)
+              AND source = 'tcgplayer'
+              AND market_price IS NOT NULL
+              AND captured_date < CAST(:since AS date)
+            ORDER BY
+                card_id,
+                condition,
+                captured_date DESC,
+                (variant IS NULL) DESC,
+                variant,
+                captured_at
+            """
+        ),
+        {"card_ids": card_ids, "conditions": conditions, "since": since},
+    ).fetchall()
+    for r in carry:
+        key = (r.card_id, r.condition)
+        if key not in keys_set:  # pragma: no cover -- ANY/ANY filter is exact
+            continue
+        by_key[key].insert(
+            0, _Snap(captured_date=r.captured_date, market_price=r.market_price)
+        )
+
     return by_key
 
 

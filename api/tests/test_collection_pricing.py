@@ -431,3 +431,59 @@ def test_movers_all_window_with_no_snapshots(db_session, sample_cards):
     rows = [_row("base1-4")]
     g, l = movers(db_session, rows, "all", 5, Decimal("0.05"))
     assert g == [] and l == []
+
+
+# --- windowed history: the carry-in ----------------------------------------
+
+
+def test_timeseries_carries_a_price_in_from_before_the_window(
+    db_session, sample_cards
+):
+    """A card whose price last moved before the window still has a value.
+
+    _fetch_history bounds its query to the window so a large collection does
+    not drag every snapshot ever recorded into memory, but that bound would
+    zero out any card with no in-window movement. One carry-in row per key
+    keeps the line at its real value from day one.
+    """
+    from datetime import date, timedelta
+
+    from services.collection_pricing import daily_timeseries
+
+    today = date.today()
+    # Only snapshot is 200 days old -- far outside the 30-day window.
+    _add_snapshot(db_session, "base1-4", today - timedelta(days=200), "40.00")
+    db_session.flush()
+
+    points, earliest = daily_timeseries(db_session, [_row("base1-4", quantity=2)], "30d")
+
+    assert len(points) == 30
+    assert earliest == today - timedelta(days=200)
+    # Every day carries the old price forward: 40.00 x 2.
+    assert all(p.value == Decimal("80.00") for p in points)
+
+
+def test_timeseries_prefers_a_stable_variant_within_a_date(db_session, sample_cards):
+    """Two variants on the same date must not alternate across days.
+
+    Cards with no standard-variant row (holo-only promos, for instance) left
+    the tiebreak to captured_at, so the chart could swing between a 1st
+    Edition and a regular Holo price for the same card -- large apparent
+    movement with no actual price change.
+    """
+    from datetime import date, timedelta
+
+    from services.collection_pricing import daily_timeseries
+
+    today = date.today()
+    for offset in (5, 4, 3):
+        day = today - timedelta(days=offset)
+        _add_snapshot(db_session, "base1-4", day, "10.00", variant="holofoil")
+        _add_snapshot(db_session, "base1-4", day, "90.00", variant="1st_edition_holofoil")
+    db_session.flush()
+
+    points, _ = daily_timeseries(db_session, [_row("base1-4", quantity=1)], "7d")
+
+    # Whichever variant wins, it must win on every day -- one distinct value.
+    in_window = {p.value for p in points if p.value > 0}
+    assert len(in_window) == 1
