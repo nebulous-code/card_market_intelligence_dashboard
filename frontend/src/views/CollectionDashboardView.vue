@@ -322,9 +322,9 @@ const unpricedSummary = computed(() => {
   )
 
   const lines = []
-  if (sets.text) lines.push(`We do not have pricing for ${sets.text} yet.`)
-  if (cardsOnly.text) lines.push(`We do not have pricing for ${cardsOnly.text} yet.`)
-  if (conditions.text) lines.push(`We do not have pricing for ${conditions.text} yet.`)
+  if (sets.text) lines.push(`We do not have pricing for ${sets.text}.`)
+  if (cardsOnly.text) lines.push(`We do not have pricing for ${cardsOnly.text}.`)
+  if (conditions.text) lines.push(`We do not have pricing for ${conditions.text}.`)
   if (sets.truncated || cardsOnly.truncated || conditions.truncated) {
     lines.push('Download Excel and review collection worksheet for a more detailed list.')
   }
