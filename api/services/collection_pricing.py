@@ -41,6 +41,7 @@ from schemas.collection import (
     ParsedCollectionRow,
     TimeseriesPoint,
 )
+from services.pricing_coverage import REASON_CONDITION_UNPRICED, coverage_reasons
 
 
 WINDOW_DAYS: dict[str, int | None] = {
@@ -59,7 +60,9 @@ def cards_with_prices(
 
     Returns one entry per session row in the same order. Cards with no
     snapshot data have ``market_price=None`` so the frontend can either
-    show a placeholder or exclude them from value calculations.
+    show a placeholder or exclude them from value calculations, plus
+    ``price_missing`` / ``price_missing_reason`` so it can say which rows
+    those were rather than quietly dropping them from the totals.
     """
     if not rows:
         return []
@@ -67,6 +70,7 @@ def cards_with_prices(
     card_ids = sorted({r.card_id for r in rows})
     cards = _fetch_card_metadata(db, card_ids)
     latest_prices = _fetch_latest_prices(db, card_ids)
+    reasons = coverage_reasons(db, card_ids)
 
     out: list[CollectionCardWithPrice] = []
     for row in rows:
@@ -74,6 +78,14 @@ def cards_with_prices(
         if meta is None:  # pragma: no cover -- session rows reference live cards
             continue
         market_price = latest_prices.get((row.card_id, row.condition))
+        price_missing = market_price is None
+        # A card can be priced in NM but not in the condition the user owns.
+        # Unlike the Excel export this path does not fall back, so that case
+        # reaches here with no price and no card-level reason.
+        price_missing_reason = (
+            (reasons.get(row.card_id) or REASON_CONDITION_UNPRICED)
+            if price_missing else None
+        )
         out.append(
             CollectionCardWithPrice(
                 card_id=row.card_id,
@@ -91,6 +103,8 @@ def cards_with_prices(
                 quantity=row.quantity,
                 market_price=market_price,
                 purchase_price=row.purchase_price,
+                price_missing=price_missing,
+                price_missing_reason=price_missing_reason,
             )
         )
     return out

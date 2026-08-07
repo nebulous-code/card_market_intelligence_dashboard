@@ -24,7 +24,7 @@ def _make_stats(matched=1, skipped=0, errors=0, ppt_total=1,
 
 
 def _patch_db_session(mocker, run_module, sets):
-    """Mock create_engine + Session so get_all_sets returns the seeded list."""
+    """Mock create_engine + Session so get_priced_sets returns the seeded list."""
     mocker.patch.object(run_module, "create_engine", return_value=object())
 
     class FakeSession:
@@ -41,7 +41,7 @@ def _patch_db_session(mocker, run_module, sets):
             return self
 
     mocker.patch.object(run_module, "Session", FakeSession)
-    mocker.patch.object(run_module, "get_all_sets", return_value=sets)
+    mocker.patch.object(run_module, "get_priced_sets", return_value=sets)
 
 
 def test_main_no_sets_fails_loudly(monkeypatch, mocker, caplog):
@@ -60,9 +60,9 @@ def test_main_no_sets_fails_loudly(monkeypatch, mocker, caplog):
         with pytest.raises(SystemExit) as exc:
             run.main()
     assert exc.value.code == 1
-    assert "No sets found" in caplog.text
+    assert "No priced sets found" in caplog.text
     # The summary must still be produced -- that is what feeds the email.
-    assert "no sets in database" in caplog.text.lower()
+    assert "no priced sets configured" in caplog.text.lower()
 
 
 def test_main_processes_sets_end_to_end(monkeypatch, mocker, caplog):

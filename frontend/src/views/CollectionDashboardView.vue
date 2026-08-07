@@ -26,6 +26,22 @@
     />
 
     <template v-else-if="cards.length > 0">
+      <!-- Sits above the KPIs because the KPIs are the numbers being
+           undercounted. Dismissible: it reappears on reload rather than
+           staying gone, so the totals are never silently wrong for a whole
+           session, but it does not nag on every scroll either. -->
+      <v-alert
+        v-if="unpricedSummary && !unpricedDismissed"
+        type="info"
+        variant="tonal"
+        class="mb-4"
+        closable
+        @click:close="unpricedDismissed = true"
+      >
+        <div class="font-weight-medium">{{ unpricedSummary.headline }}</div>
+        <div class="text-body-2 mt-1">{{ unpricedSummary.detail }}</div>
+      </v-alert>
+
       <CollectionKpis :cards="filteredCards" />
 
       <CollectionTreemap :cards="filteredCards" :palette="palette" />
@@ -68,8 +84,8 @@
     <template v-else>
       <EmptyState
         icon="mdi-cards-outline"
-        title="No priced cards in this collection"
-        message="Your upload was accepted, but none of its cards could be matched to current pricing. Check the card numbers and set names, then upload again."
+        title="No pricing available for this collection"
+        message="Your upload was accepted and your cards are real -- we just do not have price data for any of their sets yet. Check the Sets page to see what is covered."
       />
       <div class="mt-4 d-flex ga-2">
         <v-btn color="primary" to="/collection">Upload another collection</v-btn>
@@ -238,6 +254,32 @@ function triggerBlobDownload(blob, fallbackName) {
 // Filter state. A reactive() wrapper around four Sets means every change
 // flows to filteredCards via Vue's standard reactivity.
 const filterState = reactive(createEmptyFilterState())
+
+const unpricedDismissed = ref(false)
+
+// Counts against the whole collection, not the current filter: the point is
+// that rows are missing from the totals entirely, which a set filter would
+// otherwise hide. Quantity-weighted, so three copies of one unpriced card
+// read as three cards rather than one row.
+const unpricedSummary = computed(() => {
+  const missing = cards.value.filter((c) => c.price_missing)
+  if (missing.length === 0) return null
+
+  const count = missing.reduce((n, c) => n + (c.quantity || 1), 0)
+  const names = [...new Set(missing.map((c) => c.set_name))].sort()
+  let named = names.slice(0, 3).join(', ')
+  if (names.length > 3) named += ` and ${names.length - 3} more`
+
+  const all = missing.length === cards.value.length
+  return {
+    headline: all
+      ? 'None of these cards can be valued yet'
+      : `${count} card${count === 1 ? '' : 's'} are not included in these totals`,
+    detail: all
+      ? `We do not buy price data for ${named} yet. Your card list is still here, and the sets are still real.`
+      : `We do not have pricing for ${named} yet. Everything else is valued as normal.`,
+  }
+})
 
 const filteredCards = computed(() => filterCards(cards.value, filterState))
 

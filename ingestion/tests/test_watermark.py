@@ -63,11 +63,11 @@ def test_set_watermark_upserts_on_conflict(db_session):
     assert row.last_offset == 42
 
 
-def test_get_all_sets_orders_by_release_date(db_session):
-    """get_all_sets returns oldest-first; sets with no date sort last."""
+def test_get_priced_sets_orders_by_release_date(db_session):
+    """get_priced_sets returns oldest-first; sets with no date sort last."""
     from datetime import date
 
-    from watermark import get_all_sets
+    from watermark import get_priced_sets
 
     db_session.execute(
         text(
@@ -77,8 +77,17 @@ def test_get_all_sets_orders_by_release_date(db_session):
             "('a', 'Newer', 'X', 1, '2024-01-01', NOW())"
         )
     )
+    # Only a set with a ('ppt', 'name') mapping counts as priced.
+    db_session.execute(
+        text(
+            "INSERT INTO set_identifiers (set_id, source, identifier, identifier_type) VALUES "
+            "('z', 'ppt', 'Z',     'name'), "
+            "('b', 'ppt', 'Older', 'name'), "
+            "('a', 'ppt', 'Newer', 'name')"
+        )
+    )
 
-    rows = get_all_sets(db_session)
+    rows = get_priced_sets(db_session)
     assert [r["id"] for r in rows] == ["b", "a", "z"]
     # Sanity: dict shape is what run.py expects.
     assert all({"id", "name"} <= r.keys() for r in rows)
@@ -86,3 +95,33 @@ def test_get_all_sets_orders_by_release_date(db_session):
     assert date(1999, 1, 1).year == 1999
     # `now` must be a datetime in UTC for log lines to make sense.
     assert datetime.now(timezone.utc).tzinfo is not None
+
+
+def test_get_priced_sets_excludes_sets_without_a_ppt_mapping(db_session):
+    """A catalogued set we do not pay for must not reach the price run.
+
+    This is the whole point of the function: since the catalogue ingest
+    landed, the sets table holds every set TCGdex publishes, and iterating
+    all of them would produce a wall of resolver errors every night.
+    """
+    from watermark import get_priced_sets
+
+    db_session.execute(
+        text(
+            "INSERT INTO sets (id, name, series, printed_total, release_date, created_at) VALUES "
+            "('priced',   'Priced',   'X', 1, '2000-01-01', NOW()), "
+            "('unpriced', 'Unpriced', 'X', 1, '2000-01-02', NOW())"
+        )
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO set_identifiers (set_id, source, identifier, identifier_type) VALUES "
+            "('priced', 'ppt', 'Priced', 'name'), "
+            # A tcgdex mapping is not a PPT mapping -- this set is catalogued
+            # but not paid for, and must still be excluded.
+            "('unpriced', 'tcgdex', 'unpriced', 'id')"
+        )
+    )
+
+    rows = get_priced_sets(db_session)
+    assert [r["id"] for r in rows] == ["priced"]

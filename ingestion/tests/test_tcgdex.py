@@ -94,3 +94,68 @@ def test_get_cards_handles_missing_name_gracefully():
     responses.add(responses.GET, f"{BASE_URL}/cards/base1-1", json={"id": "base1-1"}, status=200)
 
     assert get_cards(brief) == [{"id": "base1-1"}]
+
+
+# --- get_sets: the catalogue list call -------------------------------------
+
+
+def test_get_sets_returns_the_full_list():
+    """One call yields every set; no page loop needed."""
+    import responses as responses_lib
+
+    from tcgdex import BASE_URL, get_sets
+
+    with responses_lib.RequestsMock() as rsps:
+        rsps.add(
+            responses_lib.GET,
+            f"{BASE_URL}/sets",
+            json=[{"id": "base1", "name": "Base Set"}, {"id": "base2", "name": "Jungle"}],
+            status=200,
+        )
+        sets = get_sets()
+
+    assert [s["id"] for s in sets] == ["base1", "base2"]
+
+
+def test_get_sets_warns_when_the_response_fills_the_page(monkeypatch, caplog):
+    """A response exactly the size we asked for is probably truncated.
+
+    TCGdex returns all sets in one response today, but the generic pagination
+    contract documents a default page size. If that were ever enforced here
+    we would silently ingest a partial catalogue, so this warns instead.
+    """
+    import logging
+
+    import responses as responses_lib
+
+    import tcgdex
+    from tcgdex import BASE_URL
+
+    monkeypatch.setattr(tcgdex, "CATALOGUE_PAGE_SIZE", 2)
+
+    with responses_lib.RequestsMock() as rsps:
+        rsps.add(
+            responses_lib.GET,
+            f"{BASE_URL}/sets",
+            json=[{"id": "a"}, {"id": "b"}],
+            status=200,
+        )
+        with caplog.at_level(logging.WARNING):
+            sets = tcgdex.get_sets()
+
+    assert len(sets) == 2
+    assert "may be truncated" in caplog.text
+
+
+def test_get_sets_raises_on_http_error():
+    """A failed list call is fatal -- there is nothing to iterate."""
+    import pytest
+    import requests
+    import responses as responses_lib
+
+    from tcgdex import BASE_URL, get_sets
+
+    with responses_lib.RequestsMock() as rsps:
+        rsps.add(responses_lib.GET, f"{BASE_URL}/sets", status=500)
+        with pytest.raises(requests.HTTPError):
+            get_sets()

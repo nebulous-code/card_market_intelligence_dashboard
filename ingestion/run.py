@@ -43,7 +43,7 @@ load_dotenv(find_dotenv())
 from loader import insert_price_snapshots                                    # noqa: E402
 from pokemonpricetracker import credits_exhausted, fetch_prices              # noqa: E402
 from set_resolver import SOURCE_PPT, SetIdentifierNotFoundError, resolve_identifier  # noqa: E402
-from watermark import get_all_sets, set_watermark                            # noqa: E402
+from watermark import get_priced_sets, set_watermark                         # noqa: E402
 from sqlalchemy import create_engine                                         # noqa: E402
 from sqlalchemy.orm import Session                                           # noqa: E402
 
@@ -120,7 +120,7 @@ def main() -> None:
     engine = create_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
 
     with Session(engine) as session:
-        sets = get_all_sets(session)
+        sets = get_priced_sets(session)
 
     # Deliberately not an early exit. Returning here would skip the
     # summary block below, which is what writes EMAIL_BODY to
@@ -128,7 +128,11 @@ def main() -> None:
     # fallback email while the job itself went green. Falling through
     # with an empty list produces an accurate summary instead.
     if not sets:
-        log.warning("No sets found in the database. Run the TCGdex ingestion first.")
+        log.warning(
+            "No priced sets found. Every set needs a ('ppt', 'name') row in "
+            "set_identifiers before it will be fetched -- add it to "
+            "priced_sets.yml and let the sync step create it."
+        )
     else:
         log.info("Found %d sets to process: %s", len(sets), [s["id"] for s in sets])
 
@@ -269,7 +273,7 @@ def main() -> None:
     if run_total_errors > 0:
         overall_status = "❌ Failed"
     elif not sets:
-        overall_status = "❌ Failed (no sets in database)"
+        overall_status = "❌ Failed (no priced sets configured)"
     elif sets_completed == 0:
         overall_status = "❌ Failed (no sets completed)"
     elif sets_skipped > 0 or run_total_skipped > 0:

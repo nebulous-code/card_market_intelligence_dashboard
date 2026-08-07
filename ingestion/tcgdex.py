@@ -2,8 +2,8 @@
 HTTP client for the TCGdex REST API.
 
 TCGdex is a free, open-source Pokemon TCG data API. It requires no API key
-or account -- all requests are unauthenticated. This module provides two
-functions that the ingestion script uses to fetch set and card data.
+or account -- all requests are unauthenticated. This module provides the
+functions that the ingestion scripts use to fetch set and card data.
 
 API base URL: https://api.tcgdex.net/v2/en
 Full API reference: docs/tcgdex_api_specs.md
@@ -13,12 +13,83 @@ import logging
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter, Retry
 
 log = logging.getLogger(__name__)
 
 # The base URL for all API requests. The "en" segment specifies English
 # as the language for card names and descriptions.
 BASE_URL = "https://api.tcgdex.net/v2/en"
+
+# Page size requested from the /sets list endpoint. TCGdex returns all sets
+# in one response today, but the generic pagination contract documents a
+# default of 100 -- asking for a larger page explicitly means we keep getting
+# the whole catalogue even if that default is ever enforced on this endpoint.
+# There are ~218 sets, so 500 leaves plenty of headroom.
+CATALOGUE_PAGE_SIZE = 500
+
+# Gap between per-set detail calls during a full catalogue walk. TCGdex
+# publishes no documented rate limit; at roughly 0.2s of server latency per
+# call this pacing works out near 3 requests/second, which is well inside
+# what the API has been observed to sustain, and keeps a 218-set walk to
+# a little over a minute.
+CATALOGUE_DELAY_SECONDS = 0.1
+
+# A single pooled session shared by every request in this module. A full
+# catalogue walk is 219 calls; without connection reuse each one pays for a
+# fresh TLS handshake. The retry policy covers transient gateway errors only
+# -- a 404 is a real answer and must not be retried.
+_SESSION = requests.Session()
+_SESSION.mount(
+    "https://",
+    HTTPAdapter(
+        max_retries=Retry(
+            total=2,
+            backoff_factor=1,
+            status_forcelist=(502, 503, 504),
+            allowed_methods=frozenset(["GET"]),
+        )
+    ),
+)
+
+
+def get_sets() -> list[dict[str, Any]]:
+    """
+    Fetch the list of every set TCGdex knows about.
+
+    Returns brief set objects -- id, name, and card counts, but not the
+    series, release date, or card list. Call get_set() for those. This is
+    the entry point for a full catalogue walk: one cheap call that yields
+    the ~218 set IDs to iterate.
+
+    Returns:
+        list[dict]: Brief set objects, each with at least "id" and "name".
+
+    Raises:
+        requests.HTTPError: If the API returns a non-2xx status code.
+        requests.RequestException: If the request fails due to a network
+            error or timeout.
+    """
+    response = _SESSION.get(
+        f"{BASE_URL}/sets",
+        params={"pagination:itemsPerPage": CATALOGUE_PAGE_SIZE},
+        timeout=30,
+    )
+    response.raise_for_status()
+    sets = response.json()
+
+    # If the response is exactly the page size we asked for, we are probably
+    # looking at a truncated first page rather than the whole catalogue.
+    # Warn rather than fail: a partial catalogue still ingests fine, and the
+    # nightly summary is the right place for "this needs a second look".
+    if len(sets) >= CATALOGUE_PAGE_SIZE:
+        log.warning(
+            "TCGdex returned %d sets, which matches the requested page size. "
+            "The catalogue may be truncated -- raise CATALOGUE_PAGE_SIZE.",
+            len(sets),
+        )
+
+    return sets
 
 
 def get_set(set_id: str) -> dict[str, Any]:

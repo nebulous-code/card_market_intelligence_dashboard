@@ -29,11 +29,20 @@ router = APIRouter(prefix="/sets", tags=["sets"])
 @router.get("", response_model=list[SetResponse])
 def list_sets(db: Session = Depends(get_db)):
     """
-    Return all sets stored in the database.
+    Return the sets we have price data for.
 
     Sets are ordered by release date descending so the most recently
     released set appears first. This is the endpoint the frontend calls
     to populate the set selector dropdown.
+
+    Sets with no price snapshots are excluded. Since the catalogue ingest
+    landed, the sets table holds every set TCGdex publishes -- around 218 --
+    the large majority of which we do not buy price data for. Listing them
+    all here would fill the browser with cards that open onto an empty page.
+
+    The collection upload template is deliberately NOT filtered this way: a
+    user must be able to enter a real set they own even when we cannot value
+    it. This endpoint is therefore also the place to check what is priced.
 
     Args:
         db: Database session provided automatically by FastAPI's dependency
@@ -69,7 +78,12 @@ def list_sets(db: Session = Depends(get_db)):
     )
     count_by_set = {row.set_id: row.total_count for row in card_counts}
 
-    sets = db.query(Set).order_by(Set.release_date.desc().nulls_last()).all()
+    sets = (
+        db.query(Set)
+        .filter(Set.id.in_(stats_by_set.keys()))
+        .order_by(Set.release_date.desc().nulls_last())
+        .all()
+    )
     result = []
     for s in sets:
         stats = stats_by_set.get(s.id)

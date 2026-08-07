@@ -8,7 +8,7 @@ This is a portfolio project built to demonstrate full-stack development, API des
 
 ## Demo
 
-[Check Out The Demo](https://card-market-dashboard.onrender.com/)
+[Check Out The Demo](https://cards.nebulouscode.com/)
 
 ---
 
@@ -113,6 +113,30 @@ Interactive API documentation is available while the API is running:
 | GET | `/sets/{set_id}` | Get a single set |
 | GET | `/sets/{set_id}/cards` | Get all cards for a set |
 | GET | `/cards/{card_id}` | Get a single card with latest prices |
+
+---
+
+## Deployment
+
+Both services run on [Render](https://render.com); the database is [Neon](https://neon.tech).
+
+| | Address |
+| --- | --- |
+| Dashboard | `https://cards.nebulouscode.com` |
+| API | `https://card-market-api.onrender.com` |
+
+The dashboard is served from a custom domain via a CNAME pointing at its Render service; Render provisions the TLS certificate. The API deliberately stays on its Render hostname.
+
+That split means the browser sees two different registrable domains, so requests from the dashboard to the API are genuinely cross-origin. Two settings follow from it and must agree, or the collection upload silently stops working:
+
+| Service | Variable | Value |
+| --- | --- | --- |
+| API | `FRONTEND_URL` | `https://cards.nebulouscode.com` |
+| Dashboard | `VITE_API_BASE_URL` | `https://card-market-api.onrender.com` |
+
+`FRONTEND_URL` is the origin CORS allows — scheme included, no trailing slash. The session cookie is issued `SameSite=None; Secure` for the same reason; see `_cookie_samesite()` in `api/routers/collection.py`.
+
+The API sleeps on the free tier, so a first request after idle can take thirty seconds or more. The frontend polls `/wake` and shows a loading screen rather than hiding it.
 
 ---
 

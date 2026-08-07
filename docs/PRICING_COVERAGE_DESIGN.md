@@ -2,7 +2,7 @@
 
 How the app should behave when a user uploads a card or set that is genuinely real but that we do not have pricing data for.
 
-Status: design, not yet built. Open decisions are at the bottom.
+Status: built. The decisions this raised, and how they were settled, are at the bottom.
 
 ---
 
@@ -97,6 +97,8 @@ Two tiers, because the cost difference is 50 seconds versus 1.2 hours:
 - **Identity for all 218 sets** — set metadata plus each card's `id`, `name`, `number`. Enough to answer "is this real?". Cheap enough to run nightly so newly released sets appear automatically.
 - **Full metadata only for priced sets** — `rarity` and `supertype`, which are only needed for cards we actually display, slice, and price.
 
+`rarity` and `supertype` are **not** backfilled for unpriced sets. They serve no purpose for validation, they are the expensive tier, and both columns are nullable with a NULL-tolerant foreign key. If unpriced sets ever surface somewhere that needs rarity, that is the point to reconsider.
+
 Requires three additions that are absences rather than couplings: a `get_sets()` client function, a driver that loops sets, and some throttling.
 
 ### 2. A YAML drives which sets we pay to price
@@ -104,6 +106,10 @@ Requires three additions that are absences rather than couplings: a `get_sets()`
 `set_identifiers` is **already** the priced-sets list — `run.py:153-158` resolves a set's PPT name before any HTTP call and skips it at zero credit cost when there is no `('ppt', 'name')` row.
 
 So the YAML should generate those rows, not replace them. A file listing canonical id, TCGdex id, and PPT name, plus a sync step that upserts into `set_identifiers`. That gives the intended workflow — buy a set, add a line, commit — without creating a second source of truth or touching a tested code path.
+
+The sync is **a module in `ingestion/` with a thin entry point, invoked by the nightly workflow** -- `priced_sets.py` plus `run_sync_priced_sets.py`, matching the shape of `refresh_multipliers.py`. It does not live in `tools/`: that directory sits outside the coverage config's `source` list, which makes it the wrong home for the code that decides what we pay for, and a script there would need a `sys.path` hack to import `set_resolver`. Keeping it in a script rather than a migration means it cannot drift from the YAML, and calling it from the workflow means the workflow file documents when it runs. It has an ordering dependency: a set must exist in `sets` before `register_identifier` will accept a mapping for it, so the catalogue ingest has to precede the sync, which has to precede the price run.
+
+**Removing a set from the YAML stops future refreshes but keeps the accumulated history.** Such a set still satisfies the coverage check below and continues to be treated as priced — its data simply stops advancing. That is the intended behaviour: deleting months of price history because a line was removed from a config file would be a surprising amount of destruction for a small edit.
 
 The nightly run also needs filtering: `get_all_sets()` is currently unfiltered, so 218 sets would produce roughly 213 skip-errors per night and swamp the summary email.
 
@@ -113,26 +119,43 @@ The YAML expresses **intent**. The database expresses **truth**. A set added thi
 
 So the API answers "do we have prices for this set?" with an `EXISTS` against `price_snapshots`, following the `/trends/sets-with-multipliers` precedent. Self-maintaining, cannot drift, no flag to forget to flip.
 
-### 4. Accept the upload, exclude the rows, and say so in three places
+### 4. Accept the upload, exclude the rows, and say so
 
 A row from an unpriced set is **not** a validation error. The upload succeeds. The rows are excluded from valuation and reported.
 
-Disclosure happens at three levels, deliberately, because each covers a failure of the others:
+Disclosure happens in three places, because each covers a failure of the others:
 
-**Immediate — on upload.** A message naming the sets we could not price and how many rows that affected.
+**Immediate — on upload.** A message naming the sets we could not price and how many rows that affected. No contact address here; see below.
 
-**Durable — a column on the collection table.** A new column in `collection_details` that is blank when a row priced normally and carries a short reason when it did not. This is the load-bearing piece: a popup is transient, but the workbook gets saved, emailed, and opened three weeks later. Row-level data is also what makes a support request debuggable — "which cards are missing" is answerable at a glance.
+**Durable — two columns on the collection table.** Added to `collection_details`:
 
-**Discoverable — a count on the Dashboard.** A single figure such as "cards without pricing". One cell, no layout problem, and it sits where the user is already looking. Without this, the column only helps someone who already suspects a problem.
+- `price_missing` — boolean. `TRUE` means we have no price at all for this row.
+- `price_missing_reason` — short explanatory string, populated only when `price_missing` is `TRUE`.
 
-The About sheet stays **static**. It explains what the column means and gives a contact address for requesting a set. Dynamic content at the top of a sheet would have to size itself and push the ListObjects down, which the patcher is not built for and does not need to be.
+This is the load-bearing piece. A popup is transient, but the workbook gets saved, emailed, and opened three weeks later. Row-level data is also what makes a support request debuggable — "which cards are missing" is answerable at a glance, by the user or by whoever they email.
+
+Note this is distinct from the existing `pricing_warning`, which means the opposite kind of thing: we *do* have a price, but it was derived by falling back to a different condition. `price_missing` means there is no price to show.
+
+**Persistent — a banner on the web dashboard.** The web view has the same silent-incompleteness problem as the workbook, so it carries a header warning when any row is excluded.
+
+The About sheet stays **static**. Dynamic content at the top of a sheet would have to size itself and push the ListObjects down, which the patcher is not built for and does not need to be. It explains what the two columns mean and carries the contact line — placed near the top, under the generated-by attribution:
+
+> Contact me@nebulouscode.com with questions, comments, concerns, or requests for set additions.
+
+**The contact address appears only on the About sheet** — not in the upload response, not on the web dashboard.
+
+A Dashboard KPI counting unpriced cards was considered and **deferred**. The column is the durable record; a KPI would only make it more discoverable. It is recorded in the Milestone 6+ roadmap rather than built now.
 
 ### 5. `/sets` filters, the upload template does not
 
 - **`/sets` screen** shows only sets we have data on, via the same `EXISTS` filter. Showing 218 sets where 214 are empty would be worse than showing four.
 - **Upload template dropdown** shows everything. `collection_template._query_set_names` already queries `SELECT name FROM sets` live per request, explicitly so "the dropdown grows with the database without code changes" — so a full catalogue appears with no code change at all.
 
-That is the split the user needs: the dropdown is what you may *enter*, `/sets` is what we have *data* on. The dropdown is also the better place for it, since it is in front of the user at the moment they are filling the form.
+That is the split: the dropdown is what you may *enter*, `/sets` is what we have *data* on. The dropdown is also the better place for it, since it is in front of the user at the moment they are filling the form.
+
+The dropdown does **not** mark which sets are priced. Marking them was considered and dropped: Excel data-validation lists have no separate display and stored value, so whatever the user picks lands verbatim in the `Set` column. A marker like `Jungle *` would arrive at the validator, fail to match `sets.name`, and resolve as unrecognized — producing exactly the "you made a typo" message this design exists to eliminate, and only for the sets the marker was meant to help. Making it work would mean stripping the marker during normalization, which is a permanent obligation on the validator for a cosmetic hint.
+
+Instead, `/sets` is the place to check what is priced. The user finds out either by looking there beforehand or from the upload response afterwards, and the upload response is the more reliable of the two because it is specific to what they actually submitted.
 
 ### 6. The same treatment at card level
 
@@ -140,20 +163,39 @@ After a full catalogue ingest, "card number does not exist in this set" becomes 
 
 ---
 
-## What it costs to add the column
+## What it costs to add the columns
 
-The Excel column is cheap but not free, and one step is easy to miss.
+Cheap but not free, and one step is easy to miss. Both new columns pay this cost.
 
-`_DETAILS_COLUMNS` in `api/services/collection_excel.py` and the template's `collection_details` header currently match exactly at 19 columns. Nothing in the test suite pins the count.
+`_DETAILS_COLUMNS` in `api/services/collection_excel.py` and the template's `collection_details` header currently match exactly at 19 columns, going to 21. Nothing in the test suite pins the count.
 
 The patcher **preserves the template's header row verbatim** and only rewrites data rows. So adding a column means:
 
 1. Add the entry to `_DETAILS_COLUMNS`.
 2. **Manually add the header cell in the template workbook** and extend the ListObject. Without this the patcher writes data into a column with no header, and Power Query names it something arbitrary.
-3. Add it to `qCollection`'s type transform. Not strictly required — `Table.TransformColumnTypes` passes unlisted columns through — but leaving it out means the column arrives untyped.
+3. Add it to `qCollection`'s type transform. Not strictly required — `Table.TransformColumnTypes` passes unlisted columns through — but leaving it out means the column arrives untyped, and `price_missing` in particular wants to be a real boolean so it can drive conditional formatting.
 4. Add it to `qCardsRanked`'s `Table.SelectColumns` list, or it will not appear on the Cards Ranked sheet.
 
 Step 2 is manual Excel work and is the one that will bite if forgotten.
+
+Worth pairing with a conditional-formatting rule on `price_missing`, matching how `pricing_warning` is already highlighted — otherwise the column only helps someone reading row by row.
+
+---
+
+## Decisions taken
+
+The questions this design raised, and how they were settled.
+
+| Question | Decision |
+| --- | --- |
+| Wording of `price_missing_reason` | A fixed two-value vocabulary, never free text: `Set not priced yet` and `Card not priced yet`. It is user-facing copy and the thing you grep when someone emails about a missing card, so it has to be stable. It does not name the set -- `set_name` is already its own column. |
+| Can `price_missing` and `pricing_warning` both be TRUE? | No. Mutually exclusive by construction, asserted in a test. `pricing_warning` means a price was derived by fallback; `price_missing` means there is no price at all. The variant leg of `pricing_warning` has to be suppressed when a row is unpriced, or a variant row with no price would set both. |
+| Web dashboard banner | Dismissible, sitting above the KPI row -- the KPIs are the numbers being undercounted. Dismissibility puts more weight on the other two disclosure points, which is why the upload response matters. |
+| Every row unpriced | Accepted, but with its own message. A dashboard with no valuations anywhere is the case most likely to read as broken, and "some cards are not included" badly undersells it. |
+| Is the reason stored or re-derived? | **Re-derived**, through one shared helper. Storing it on the session row would mean threading the field through the schema, the validator, and both hand-written serialization lists, and it would go stale whenever coverage changed. The usual objection to re-deriving is that two outputs could disagree; they cannot, because there is exactly one implementation and all three callers use it. |
+| One workflow or two? | One job, ordered catalogue then sync then prices, with `continue-on-error` on the two new steps. That keeps the ordering guaranteed while ensuring a TCGdex outage degrades to "last night's catalogue" rather than blocking the paid price run. |
+| TCG Pocket sets | Excluded. 15 of the 218 sets are the digital-only phone game, and every feature downstream -- conditions, upgrade cost, purchase price -- is meaningless for a card that cannot be physically owned. They would otherwise sit in the dropdown as permanently unpriced. |
+| Where the sync script lives | `ingestion/`, not `tools/`. `tools/` is outside the coverage config's `source` list, which makes it the wrong home for the code that decides what we pay for. |
 
 ---
 

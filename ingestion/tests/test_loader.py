@@ -947,3 +947,257 @@ def test_bulk_insert_survives_duplicate_conflict_keys(db_session):
     ).fetchall()
     assert len(row) == 1
     assert float(row[0].market_price) == 41.90
+
+
+# --- identity-only card ingest ---------------------------------------------
+
+
+def _seed_detailed_card(db_session, card_id="idt-1", set_id="idt_set"):
+    """A fully-populated set + card, as the priced sets look in production."""
+    db_session.execute(
+        text(
+            "INSERT INTO sets (id, name, series, printed_total, created_at) "
+            "VALUES (:sid, 'Identity Set', 'X', 10, NOW()) "
+            "ON CONFLICT (id) DO NOTHING"
+        ),
+        {"sid": set_id},
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO cards (id, set_id, name, number, rarity, supertype, image_url, created_at) "
+            "VALUES (:cid, :sid, 'Old Name', '1', 'rare', 'Pokemon', 'http://img/low.png', NOW())"
+        ),
+        {"cid": card_id, "sid": set_id},
+    )
+
+
+def test_identity_upsert_preserves_rarity_supertype_and_image(db_session):
+    """The reason this function exists instead of reusing upsert_card.
+
+    Brief cards from the set-detail endpoint carry no rarity, no category,
+    and often no image key at all. Reusing upsert_card's ON CONFLICT clause
+    would write EXCLUDED.rarity -- i.e. NULL -- over every card of every
+    priced set the first time a catalogue walk ran.
+    """
+    from loader import upsert_cards_identity
+
+    _seed_detailed_card(db_session)
+
+    stats = upsert_cards_identity(
+        db_session,
+        "idt_set",
+        # Exactly what /sets/{id} sends: no rarity, no category, no "image".
+        [{"id": "idt-1", "name": "New Name", "localId": "7"}],
+    )
+
+    assert stats["cards_upserted"] == 1
+    row = db_session.execute(
+        text("SELECT name, number, rarity, supertype, image_url FROM cards WHERE id = 'idt-1'")
+    ).fetchone()
+    # Identity fields updated...
+    assert row.name == "New Name"
+    assert row.number == "7"
+    # ...and the expensive metadata untouched.
+    assert row.rarity == "rare"
+    assert row.supertype == "Pokemon"
+    assert row.image_url == "http://img/low.png"
+
+
+def test_identity_upsert_inserts_new_cards_with_null_metadata(db_session):
+    """A card we have never seen gets identity only; rarity stays NULL."""
+    from loader import upsert_cards_identity
+
+    _seed_detailed_card(db_session)
+
+    upsert_cards_identity(
+        db_session, "idt_set",
+        [{"id": "idt-new", "name": "Fresh", "localId": "9", "image": "http://i/x"}],
+    )
+
+    row = db_session.execute(
+        text("SELECT name, number, rarity, supertype, image_url FROM cards WHERE id = 'idt-new'")
+    ).fetchone()
+    assert row.name == "Fresh"
+    assert row.number == "9"
+    assert row.rarity is None
+    assert row.supertype is None
+    assert row.image_url == "http://i/x/low.png"
+
+
+def test_identity_upsert_empty_list_is_a_no_op(db_session):
+    from loader import upsert_cards_identity
+
+    assert upsert_cards_identity(db_session, "idt_set", []) == {
+        "cards_upserted": 0, "duplicates_skipped": 0, "malformed_skipped": 0,
+    }
+
+
+def test_identity_upsert_dedupes_repeated_ids(db_session):
+    """A repeated id in one multi-row INSERT would abort the whole statement."""
+    from loader import upsert_cards_identity
+
+    _seed_detailed_card(db_session)
+
+    stats = upsert_cards_identity(
+        db_session, "idt_set",
+        [
+            {"id": "idt-dup", "name": "First", "localId": "1"},
+            {"id": "idt-dup", "name": "Second", "localId": "2"},
+        ],
+    )
+
+    assert stats["cards_upserted"] == 1
+    assert stats["duplicates_skipped"] == 1
+    # Last one wins.
+    row = db_session.execute(
+        text("SELECT name FROM cards WHERE id = 'idt-dup'")
+    ).fetchone()
+    assert row.name == "Second"
+
+
+def test_identity_upsert_skips_malformed_briefs(db_session):
+    """cards.name and cards.number are NOT NULL; one bad brief must not
+    abort the ~300 good cards sharing its statement."""
+    from loader import upsert_cards_identity
+
+    _seed_detailed_card(db_session)
+
+    stats = upsert_cards_identity(
+        db_session, "idt_set",
+        [
+            {"id": "idt-ok", "name": "Good", "localId": "1"},
+            {"id": "idt-bad"},                                  # no name/localId
+            {"name": "No id", "localId": "2"},                  # no id
+            {"id": "idt-bad2", "name": "No localId"},           # no localId
+        ],
+    )
+
+    assert stats["cards_upserted"] == 1
+    assert stats["malformed_skipped"] == 3
+
+
+def test_identity_upsert_all_malformed_returns_early(db_session):
+    """Every brief rejected -- no statement should be issued at all."""
+    from loader import upsert_cards_identity
+
+    stats = upsert_cards_identity(db_session, "idt_set", [{"nope": True}])
+    assert stats == {
+        "cards_upserted": 0, "duplicates_skipped": 0, "malformed_skipped": 1,
+    }
+
+
+def test_card_image_url_handles_missing_and_present():
+    from loader import _card_image_url
+
+    assert _card_image_url({"image": "http://i/x"}) == "http://i/x/low.png"
+    assert _card_image_url({"image": None}) is None
+    assert _card_image_url({}) is None
+
+
+# --- upsert_set robustness --------------------------------------------------
+
+
+def test_upsert_set_falls_back_when_series_and_count_are_missing(db_session, caplog):
+    """series and printed_total are NOT NULL. A malformed payload must not
+    turn a KeyError into an IntegrityError that rolls back the whole set."""
+    import logging
+
+    from loader import upsert_set
+
+    with caplog.at_level(logging.WARNING):
+        upsert_set(db_session, {"id": "idt_bare", "name": "Bare"})
+
+    row = db_session.execute(
+        text("SELECT series, printed_total FROM sets WHERE id = 'idt_bare'")
+    ).fetchone()
+    assert row.series == "Unknown"
+    assert row.printed_total == 0
+    assert "missing serie.name" in caplog.text
+
+
+def test_upsert_set_uses_total_when_official_is_absent(db_session):
+    """cardCount.total is a worse answer than .official but a far better one
+    than refusing to store the set."""
+    from loader import upsert_set
+
+    upsert_set(db_session, {
+        "id": "idt_tot", "name": "Totals",
+        "serie": {"name": "S"}, "cardCount": {"total": 42},
+    })
+
+    row = db_session.execute(
+        text("SELECT printed_total FROM sets WHERE id = 'idt_tot'")
+    ).fetchone()
+    assert row.printed_total == 42
+
+
+def test_upsert_set_does_not_clobber_stored_values_with_placeholders(db_session):
+    """On UPDATE the prior row is the better answer than 'Unknown'/0."""
+    from loader import upsert_set
+
+    upsert_set(db_session, {
+        "id": "idt_keep", "name": "Keep",
+        "serie": {"name": "Real Series"}, "cardCount": {"official": 99},
+    })
+    # Second pass with a degraded payload, as a flaky TCGdex response.
+    upsert_set(db_session, {"id": "idt_keep", "name": "Keep Renamed"})
+
+    row = db_session.execute(
+        text("SELECT name, series, printed_total FROM sets WHERE id = 'idt_keep'")
+    ).fetchone()
+    assert row.name == "Keep Renamed"
+    assert row.series == "Real Series"
+    assert row.printed_total == 99
+
+
+def test_load_set_identity_commits_and_reports(db_session, loader_engine_in_test):
+    from loader import load_set_identity
+
+    result = load_set_identity({
+        "id": "idt_load", "name": "Loaded",
+        "serie": {"name": "S"}, "cardCount": {"official": 2},
+        "cards": [
+            {"id": "idt_load-1", "name": "One", "localId": "1"},
+            {"id": "idt_load-2", "name": "Two", "localId": "2"},
+        ],
+    })
+
+    assert result["set_id"] == "idt_load"
+    assert result["cards_upserted"] == 2
+    count = db_session.execute(
+        text("SELECT count(*) FROM cards WHERE set_id = 'idt_load'")
+    ).scalar()
+    assert count == 2
+
+
+def test_load_set_identity_handles_a_set_with_no_cards(db_session, loader_engine_in_test):
+    from loader import load_set_identity
+
+    result = load_set_identity({
+        "id": "idt_empty", "name": "Empty",
+        "serie": {"name": "S"}, "cardCount": {"official": 0},
+    })
+    assert result["cards_upserted"] == 0
+
+
+def test_load_set_identity_reraises_and_rolls_back(db_session, loader_engine_in_test):
+    """A set that blows up mid-transaction leaves nothing behind, so one bad
+    set in a 218-set walk cannot half-write itself."""
+    import pytest
+
+    from loader import load_set_identity
+
+    # upsert_set indexes set_data["name"] directly -- name is NOT NULL and
+    # universally present, so its absence is a genuine payload fault. It
+    # raises after the transaction has opened.
+    with pytest.raises(KeyError):
+        load_set_identity({
+            "id": "idt_bad",
+            "serie": {"name": "S"}, "cardCount": {"official": 1},
+            "cards": [{"id": "idt_bad-1", "name": "C", "localId": "1"}],
+        })
+
+    count = db_session.execute(
+        text("SELECT count(*) FROM sets WHERE id = 'idt_bad'")
+    ).scalar()
+    assert count == 0

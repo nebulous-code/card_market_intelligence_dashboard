@@ -109,13 +109,32 @@ def upsert_set(session: Session, set_data: dict[str, Any]) -> None:
     Returns:
         None
     """
+    # sets.series and sets.printed_total are both NOT NULL. Every set TCGdex
+    # serves today carries serie.name and cardCount.official, but a full
+    # catalogue walk touches all 218 of them, and one malformed payload must
+    # not turn into an IntegrityError that rolls back an otherwise good set.
+    serie = set_data.get("serie") or {}
+    card_count = set_data.get("cardCount") or {}
+    series = serie.get("name")
+    printed_total = card_count.get("official")
+    if printed_total is None:
+        # "total" includes secret rares; a worse answer than "official" but a
+        # far better one than refusing to store the set at all.
+        printed_total = card_count.get("total")
+    if series is None or printed_total is None:
+        log.warning(
+            "Set %s: TCGdex payload is missing serie.name or cardCount.official. "
+            "Any value already stored will be kept.",
+            set_data.get("id"),
+        )
+
     # Build the parameter dictionary that maps database columns to values
     # from the TCGdex response. Log it at DEBUG level for diagnostics.
     params = {
         "id": set_data["id"],
         "name": set_data["name"],
-        "series": set_data["serie"]["name"],        # nested under "serie"
-        "printed_total": set_data["cardCount"]["official"],  # nested under "cardCount"
+        "series": series,
+        "printed_total": printed_total,
         "release_date": _parse_date(set_data.get("releaseDate")),
         "symbol_url": _asset_url(set_data.get("symbol")),
         "logo_url": _asset_url(set_data.get("logo")),
@@ -125,11 +144,19 @@ def upsert_set(session: Session, set_data: dict[str, Any]) -> None:
     session.execute(
         text("""
             INSERT INTO sets (id, name, series, printed_total, release_date, symbol_url, logo_url, created_at)
-            VALUES (:id, :name, :series, :printed_total, :release_date, :symbol_url, :logo_url, NOW())
+            VALUES (:id, :name,
+                    COALESCE(CAST(:series AS text), 'Unknown'),
+                    COALESCE(CAST(:printed_total AS integer), 0),
+                    :release_date, :symbol_url, :logo_url, NOW())
             ON CONFLICT (id) DO UPDATE SET
                 name = EXCLUDED.name,
-                series = EXCLUDED.series,
-                printed_total = EXCLUDED.printed_total,
+                -- These two reference the bind parameter rather than EXCLUDED
+                -- so a missing value falls back to what is already stored.
+                -- The placeholders above only apply on a genuine INSERT, where
+                -- there is no prior row to preserve and a set with an unknown
+                -- series is still a real set the validator must recognize.
+                series = COALESCE(CAST(:series AS text), sets.series),
+                printed_total = COALESCE(CAST(:printed_total AS integer), sets.printed_total),
                 release_date = EXCLUDED.release_date,
                 symbol_url = EXCLUDED.symbol_url,
                 logo_url = EXCLUDED.logo_url
@@ -147,6 +174,135 @@ def _load_rarity_aliases(session: Session) -> dict[str, str]:
         text("SELECT raw_value, canonical_value FROM rarity_aliases")
     ).fetchall()
     return {r.raw_value: r.canonical_value for r in rows}
+
+
+def _card_image_url(card_data: dict[str, Any]) -> str | None:
+    """
+    Build a card's image URL by appending "/low.png" to the base image path.
+
+    TCGdex provides the base URL without an extension or quality suffix. The
+    "low" quality keeps file sizes reasonable for a dashboard view; high
+    quality can be fetched later if needed.
+
+    Returns None when the payload has no image. Brief card objects from the
+    set-detail endpoint frequently omit the key entirely -- roughly 1,600 of
+    the ~23,000 cards in the catalogue -- so this must tolerate absence, not
+    just a null value.
+    """
+    image_base = card_data.get("image")
+    return f"{image_base}/low.png" if image_base else None
+
+
+def upsert_cards_identity(
+    session: Session,
+    set_id: str,
+    brief_cards: list[dict[str, Any]],
+) -> dict[str, int]:
+    """
+    Upsert identity-only card rows from a set's brief card list.
+
+    This is the cheap half of card ingestion. The set-detail endpoint bundles
+    a brief object per card -- id, name, localId, and usually an image -- which
+    is everything needed to answer "is this a real card?" without paying for
+    one HTTP call per card. `upsert_card` handles the expensive half, where
+    rarity and supertype come from the per-card endpoint.
+
+    The two paths must not fight over the same columns. A brief card carries
+    no rarity and no supertype, so this statement does not name those columns
+    in its ON CONFLICT clause at all -- an omitted column is left untouched by
+    Postgres. Writing EXCLUDED.rarity here would blank the rarity on every
+    card of every priced set the first time a catalogue walk ran over it.
+    image_url gets the same protection via COALESCE, because a brief that
+    omits "image" would otherwise blank an image the detail path had stored.
+
+    Args:
+        session: The active database session to execute the query on.
+        set_id: The parent set. Brief cards carry no "set" reference, so the
+            caller supplies it -- it is the same for every card in the batch.
+        brief_cards: Brief card objects from set_data["cards"].
+
+    Returns:
+        dict with keys:
+            cards_upserted    -- rows written
+            duplicates_skipped -- briefs dropped for repeating an earlier id
+            malformed_skipped  -- briefs dropped for missing a required field
+    """
+    if not brief_cards:
+        return {"cards_upserted": 0, "duplicates_skipped": 0, "malformed_skipped": 0}
+
+    # Two guards, both cheap, both protecting the whole set's transaction.
+    #
+    # A repeated id inside one multi-row INSERT raises "ON CONFLICT DO UPDATE
+    # command cannot affect row a second time", which aborts the statement and
+    # loses every card in the set. cards.name and cards.number are NOT NULL,
+    # so one malformed brief would likewise abort the batch. Neither case
+    # occurs in TCGdex's data today; both are one line to make impossible.
+    deduped: dict[str, dict[str, Any]] = {}
+    duplicates_skipped = 0
+    malformed_skipped = 0
+    for brief in brief_cards:
+        card_id = brief.get("id")
+        if not card_id or not brief.get("name") or brief.get("localId") is None:
+            log.warning(
+                "Set %s: skipping malformed brief card %r -- needs id, name and localId.",
+                set_id, brief.get("id") or brief,
+            )
+            malformed_skipped += 1
+            continue
+        if card_id in deduped:
+            log.warning("Set %s: duplicate card id %s in the brief list.", set_id, card_id)
+            duplicates_skipped += 1
+        deduped[card_id] = brief
+
+    rows = list(deduped.values())
+    if not rows:
+        return {
+            "cards_upserted": 0,
+            "duplicates_skipped": duplicates_skipped,
+            "malformed_skipped": malformed_skipped,
+        }
+
+    # One multi-row statement per chunk rather than one per card. A catalogue
+    # walk is ~23,000 cards; at a WAN round trip each that is roughly twenty
+    # minutes of pure latency. Batched, it is one call per set.
+    # Postgres caps bind parameters at 65535 per statement.
+    PARAMS_PER_ROW = 4
+    MAX_ROWS_PER_STMT = 60000 // PARAMS_PER_ROW  # 15000
+
+    for chunk_start in range(0, len(rows), MAX_ROWS_PER_STMT):
+        chunk = rows[chunk_start:chunk_start + MAX_ROWS_PER_STMT]
+        placeholders = []
+        params: dict[str, Any] = {"set_id": set_id}
+        for i, brief in enumerate(chunk):
+            placeholders.append(
+                f"(:id_{i}, :set_id, :name_{i}, :number_{i}, :image_url_{i}, NOW())"
+            )
+            params[f"id_{i}"]        = brief["id"]
+            params[f"name_{i}"]      = brief["name"]
+            params[f"number_{i}"]    = str(brief["localId"])
+            params[f"image_url_{i}"] = _card_image_url(brief)
+
+        session.execute(
+            text(f"""
+                INSERT INTO cards (id, set_id, name, number, image_url, created_at)
+                VALUES {", ".join(placeholders)}
+                ON CONFLICT (id) DO UPDATE SET
+                    name      = EXCLUDED.name,
+                    number    = EXCLUDED.number,
+                    image_url = COALESCE(EXCLUDED.image_url, cards.image_url)
+                    -- rarity and supertype are deliberately absent: this
+                    -- statement carries no rarity or supertype data, so it
+                    -- must never write those columns. See the docstring.
+                    -- set_id and created_at are likewise never rewritten.
+            """),
+            params,
+        )
+
+    return {
+        "cards_upserted": len(rows),
+        "duplicates_skipped": duplicates_skipped,
+        "malformed_skipped": malformed_skipped,
+    }
 
 
 def upsert_card(
@@ -176,10 +332,7 @@ def upsert_card(
     Returns:
         None
     """
-    # Build the image URL by appending "/low.png" to the base image path.
-    # TCGdex provides the base URL without an extension or quality suffix.
-    image_base = card_data.get("image")
-    image_url = f"{image_base}/low.png" if image_base else None
+    image_url = _card_image_url(card_data)
 
     raw_rarity = card_data.get("rarity")
     if raw_rarity is None:
@@ -286,6 +439,53 @@ def load_set(set_data: dict[str, Any], cards: list[dict[str, Any]]) -> dict[str,
         raise
 
     return {"cards_upserted": len(cards), "unknowns": unknowns}
+
+
+def load_set_identity(set_data: dict[str, Any]) -> dict[str, Any]:
+    """
+    Write one set and its cards' identities in a single transaction.
+
+    The identity-only counterpart to load_set. Takes only the set object
+    because the brief card list is already inside it at set_data["cards"] --
+    no second HTTP call is needed, which is what makes a full 218-set
+    catalogue walk cost about a minute instead of an hour.
+
+    Each set gets its own transaction so that one bad set in a catalogue walk
+    rolls back alone rather than taking the whole run with it.
+
+    Args:
+        set_data: The set object returned by tcgdex.get_set().
+
+    Returns:
+        dict with keys: set_id, cards_upserted, duplicates_skipped,
+        malformed_skipped.
+
+    Raises:
+        Exception: Re-raises anything that occurs during the transaction
+            after logging it and rolling back all changes.
+    """
+    set_id = set_data["id"]
+    brief_cards = set_data.get("cards") or []
+    log.info("Beginning identity transaction for set %s (%s)", set_id, set_data.get("name"))
+
+    try:
+        with Session(engine) as session:
+            with session.begin():
+                # The set row must exist before its cards can reference it.
+                upsert_set(session, set_data)
+                stats = upsert_cards_identity(session, set_id, brief_cards)
+                log.info(
+                    "Transaction committing -- %d card identities upserted for %s",
+                    stats["cards_upserted"], set_id,
+                )
+
+        log.info("Transaction committed successfully for set %s", set_id)
+
+    except Exception as e:
+        log.exception("Identity transaction failed and was rolled back: %s", e)
+        raise
+
+    return {"set_id": set_id, **stats}
 
 
 def insert_price_snapshots(ppt_cards: list[dict[str, Any]], set_id: str) -> dict[str, Any]:

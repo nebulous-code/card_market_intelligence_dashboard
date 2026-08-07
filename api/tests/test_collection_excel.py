@@ -575,3 +575,59 @@ def test_template_constants_are_accessible():
     the module so the router imports stay tidy."""
     assert TEMPLATE_PATH.name == "collection_template.xlsx"
     assert "spreadsheetml.sheet" in EXCEL_MEDIA_TYPE
+
+
+# --- unpriced rows in the workbook ------------------------------------------
+
+
+def test_details_sheet_carries_the_two_coverage_columns(db_session, sample_cards):
+    """End-to-end proof the widened template survived: 21 headers, and the
+    two new ones populated for a card with no price at all.
+
+    The patcher re-emits the header row verbatim and recomputes the table
+    ref from the column count, so a template whose header row was never
+    widened would produce two headerless columns here.
+    """
+    from services.pricing_coverage import REASON_CARD_UNPRICED
+
+    today = date.today()
+    _add_snapshot(db_session, "base1-4", today, "120.00", condition="NM")
+    db_session.flush()
+    # base1-58 exists in the fixture but has no snapshot -- a per-card gap
+    # inside a set we do price.
+    rows = [_row("base1-4"), _row("base1-58")]
+
+    blob = populate_template(db_session, rows)
+    wb = load_workbook(BytesIO(blob))
+    sheet = wb["Collection Details"]
+    headers = [c.value for c in sheet[1]]
+
+    assert headers[-2:] == ["price_missing", "price_missing_reason"]
+    missing_idx = headers.index("price_missing") + 1
+    reason_idx = headers.index("price_missing_reason") + 1
+
+    # Priced row.
+    assert sheet.cell(row=2, column=missing_idx).value is False
+    assert sheet.cell(row=2, column=reason_idx).value is None
+    # Unpriced row.
+    assert sheet.cell(row=3, column=missing_idx).value is True
+    assert sheet.cell(row=3, column=reason_idx).value == REASON_CARD_UNPRICED
+
+
+def test_price_missing_and_pricing_warning_are_mutually_exclusive(
+    db_session, sample_cards
+):
+    """pricing_warning means "treat this number with care"; price_missing
+    means "there is no number". A variant row with no price would set both
+    unless the variant leg is suppressed."""
+    rows = [_row("base1-58", variant=["Reverse Holo"])]
+
+    blob = populate_template(db_session, rows)
+    wb = load_workbook(BytesIO(blob))
+    sheet = wb["Collection Details"]
+    headers = [c.value for c in sheet[1]]
+    warn_idx = headers.index("pricing_warning") + 1
+    missing_idx = headers.index("price_missing") + 1
+
+    assert sheet.cell(row=2, column=missing_idx).value is True
+    assert sheet.cell(row=2, column=warn_idx).value is False

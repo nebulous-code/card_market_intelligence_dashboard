@@ -13,7 +13,23 @@ def test_list_sets_empty_when_no_data(client):
     assert response.json() == []
 
 
-def test_list_sets_returns_set_with_total_count(client, sample_set, sample_cards):
+def test_list_sets_excludes_a_set_with_no_prices(client, sample_set, sample_cards):
+    """A catalogued but unpriced set must not appear in the set list.
+
+    The catalogue ingest puts every set TCGdex publishes into the database so
+    collection uploads can be validated against real sets. Only a fraction of
+    those are ones we buy price data for, and a set card that opens onto an
+    empty page is worse than no card at all. The upload template dropdown is
+    deliberately NOT filtered this way -- see the endpoint docstring.
+    """
+    response = client.get("/sets")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_sets_returns_set_with_total_count(
+    client, sample_set, sample_cards, sample_snapshots
+):
     response = client.get("/sets")
     assert response.status_code == 200
     body = response.json()
@@ -23,10 +39,6 @@ def test_list_sets_returns_set_with_total_count(client, sample_set, sample_cards
     assert row["printed_total"] == 102
     # 2 cards in the fixture, no secrets.
     assert row["total_count"] == 2
-    # No prices ingested -> stats are null.
-    assert row["min_price"] is None
-    assert row["avg_price"] is None
-    assert row["max_price"] is None
 
 
 def test_list_sets_aggregates_price_stats(client, sample_set, sample_cards, sample_snapshots):

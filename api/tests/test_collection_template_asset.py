@@ -237,3 +237,48 @@ def test_slicers_reach_every_pivot_on_their_cache(workbook):
             failures.append(f"{field}: connected to {sorted(linked)}, expected {sorted(expected)}")
 
     assert not failures, "slicers not reaching every pivot on their cache: " + "; ".join(failures)
+
+
+def test_collection_details_table_matches_the_export_columns():
+    """The template's header row must stay in step with _DETAILS_COLUMNS.
+
+    This is a manual Excel step and therefore the one most likely to be
+    forgotten. The patcher re-emits the template's header row verbatim and
+    recomputes the table ref from len(columns), so a template that was never
+    widened yields data columns with no headers above them and a ref wider
+    than its own headers -- a workbook that opens, looks fine, and quietly
+    misfeeds every downstream query.
+    """
+    import re
+    import zipfile
+    from pathlib import Path
+
+    from services.collection_excel import _DETAILS_COLUMNS
+
+    asset = Path(__file__).resolve().parents[1] / "assets" / "collection_template.xlsx"
+    with zipfile.ZipFile(asset) as z:
+        table_xml = next(
+            z.read(n).decode("utf-8")
+            for n in z.namelist()
+            if n.startswith("xl/tables/table")
+            and n.endswith(".xml")
+            and 'displayName="collection_details"' in z.read(n).decode("utf-8")
+        )
+
+    names = re.findall(r'<tableColumn[^>]*\sname="([^"]+)"', table_xml)
+    assert names == list(_DETAILS_COLUMNS), (
+        "collection_details in the template does not match _DETAILS_COLUMNS. "
+        "Widen the header row and the ListObject in the workbook."
+    )
+
+    declared = int(re.search(r'<tableColumns count="(\d+)"', table_xml).group(1))
+    assert declared == len(_DETAILS_COLUMNS)
+
+    # The ref's right-hand column must cover exactly those columns.
+    ref = re.search(r'\sref="A1:([A-Z]+)\d+"', table_xml).group(1)
+    expected = ""
+    n = len(_DETAILS_COLUMNS)
+    while n:
+        n, rem = divmod(n - 1, 26)
+        expected = chr(65 + rem) + expected
+    assert ref == expected

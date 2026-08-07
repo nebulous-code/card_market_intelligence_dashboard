@@ -61,6 +61,10 @@ jobs:
       EMAIL_BODY: "The ingestion script crashed before generating a summary. Check the log artifact for details."
       MULTIPLIER_STATUS: "Did not run"
       MULTIPLIER_SUMMARY: "Condition multiplier refresh did not run -- price ingestion failed before this step."
+      CATALOGUE_STATUS: "Did not run"
+      CATALOGUE_SUMMARY: "TCGdex catalogue ingest did not run."
+      PRICED_SETS_STATUS: "Did not run"
+      PRICED_SETS_SUMMARY: "Priced-set sync did not run."
 
     steps:
       - name: Check out repository
@@ -78,6 +82,37 @@ jobs:
       - name: Install dependencies
         working-directory: ingestion
         run: uv sync --frozen
+
+      # Identity-only catalogue of every set TCGdex publishes (~219 calls,
+      # about 70 seconds, free and unauthenticated). This is what lets the
+      # upload validator tell "a set we don't price" from "a typo".
+      #
+      # continue-on-error is the whole point of this step's placement: it
+      # marks the step's outcome as failed while leaving the job's conclusion
+      # untouched, so a TCGdex outage degrades to "last night's catalogue"
+      # rather than blocking the paid price run below. The failure surfaces
+      # in the summary email instead of as a red X with no prices fetched.
+      - name: Ingest TCGdex set catalogue
+        continue-on-error: true
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python run_catalogue.py
+
+      # Reconcile priced_sets.yml into set_identifiers, which decides what
+      # the price run below will fetch. Must follow the catalogue step: a set
+      # has to exist in the sets table before a mapping can reference it.
+      #
+      # Runs even when the catalogue step failed, because sets ingested on
+      # previous nights are still in the table and the sync is still useful.
+      # A YAML entry whose set is missing is reported, not fatal.
+      - name: Sync priced sets from YAML
+        if: always()
+        continue-on-error: true
+        working-directory: ingestion
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python run_sync_priced_sets.py
 
       - name: Run ingestion
         working-directory: ingestion
@@ -137,7 +172,17 @@ jobs:
           subject: "[Card Market] Nightly Ingestion — ${{ env.RUN_DATE }} — ${{ env.RUN_STATUS }}"
           to: ${{ secrets.NOTIFY_EMAIL }}
           from: ${{ vars.EMAIL_FROM || 'Card Market Ingestion <noreply@mail.nebulouscode.com>' }}
+          # The two new statuses lead the body because the subject line
+          # reports the price run only -- that is the step that costs money,
+          # and three statuses in one subject gets unreadable fast. Putting
+          # them first means a catalogue failure is still the first thing read.
           body: |
+            TCGdex catalogue: ${{ env.CATALOGUE_STATUS }}
+            ${{ env.CATALOGUE_SUMMARY }}
+
+            Priced-set sync: ${{ env.PRICED_SETS_STATUS }}
+            ${{ env.PRICED_SETS_SUMMARY }}
+
             ${{ env.EMAIL_BODY }}
 
             Condition multiplier refresh: ${{ env.MULTIPLIER_STATUS }}

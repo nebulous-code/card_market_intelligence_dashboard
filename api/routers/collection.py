@@ -29,6 +29,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, UploadFile
 from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -62,6 +63,7 @@ from services.collection_session import (
 )
 from services.collection_template import build_template_workbook, template_filename
 from services.collection_validator import validate_workbook
+from services.pricing_coverage import coverage_reasons
 from services.upload_guard import (
     UploadNotReadable,
     UploadTooLarge,
@@ -97,13 +99,18 @@ def _cookie_secure() -> bool:
 def _cookie_samesite() -> str:
     """SameSite attribute paired with ``_cookie_secure()``.
 
-    The deployed frontend and API live on different ``*.onrender.com``
-    subdomains. ``onrender.com`` is on the Public Suffix List, so the
-    browser treats those subdomains as separate sites and refuses to
-    send a ``SameSite=Strict`` (or even ``Lax``) cookie on the
-    cross-site XHR. ``SameSite=None`` is required for cross-site
-    credentialed requests -- and per spec that flavor requires
-    ``Secure``, which we already set in production.
+    The deployed frontend and API live on different registrable domains
+    -- the app is served from ``cards.nebulouscode.com`` while the API
+    stays on its Render hostname. The browser therefore treats them as
+    separate sites and refuses to send a ``SameSite=Strict`` (or even
+    ``Lax``) cookie on the cross-site XHR. ``SameSite=None`` is required
+    for cross-site credentialed requests -- and per spec that flavor
+    requires ``Secure``, which we already set in production.
+
+    Worth knowing if the API ever moves under ``nebulouscode.com`` too:
+    the two would then be same-site and this could drop back to ``Lax``,
+    which is the safer default and does not depend on third-party cookie
+    behaviour that browsers keep tightening.
 
     Local dev runs both sides on ``http://localhost``, which is
     same-site, so ``Lax`` is enough and avoids browsers rejecting a
@@ -205,11 +212,70 @@ def _process_upload(
     session_id = create_session(db, result.parsed_rows)
     _set_session_cookie(response, session_id)
     card_count, set_count = _summarize(result.parsed_rows)
+    unpriced_count, unpriced_message = _describe_unpriced(db, result.parsed_rows)
     return UploadSuccess(
         session_id=session_id,
         card_count=card_count,
         set_count=set_count,
+        unpriced_count=unpriced_count,
+        unpriced_message=unpriced_message,
     )
+
+
+def _describe_unpriced(
+    db: Session, parsed_rows: list[ParsedCollectionRow]
+) -> tuple[int, str | None]:
+    """How many uploaded rows cannot be valued, and how to say so.
+
+    The upload response is the one disclosure the user is guaranteed to see:
+    the dashboard banner can be dismissed and the Excel columns only help
+    someone reading row by row. Silent incompleteness -- a total that quietly
+    omits a third of a collection -- is worse than an error, so this is
+    deliberately stated up front rather than left to be discovered.
+    """
+    reasons = coverage_reasons(db, [r.card_id for r in parsed_rows])
+    unpriced = [r for r in parsed_rows if reasons.get(r.card_id) is not None]
+    if not unpriced:
+        return 0, None
+
+    count = sum(r.quantity for r in unpriced)
+    set_names = _unpriced_set_names(db, unpriced)
+    named = ", ".join(set_names[:3])
+    if len(set_names) > 3:
+        named += f" and {len(set_names) - 3} more"
+
+    if len(unpriced) == len(parsed_rows):
+        # Every row. The dashboard will be entirely empty, which reads as
+        # broken unless it is named for what it is.
+        message = (
+            f"We do not have pricing for any of the sets in this collection "
+            f"yet ({named}), so there are no valuations to show. Your card "
+            f"list is still here, and the sets are still real -- we just do "
+            f"not buy price data for them."
+        )
+    else:
+        message = (
+            f"{count} card{'s' if count != 1 else ''} are not included in the "
+            f"totals because we do not have pricing for them yet ({named}). "
+            f"Everything else is valued as normal."
+        )
+    return count, message
+
+
+def _unpriced_set_names(
+    db: Session, unpriced_rows: list[ParsedCollectionRow]
+) -> list[str]:
+    """Distinct set names for the given rows, ordered for stable messaging."""
+    rows = db.execute(
+        text("""
+            SELECT DISTINCT s.name
+            FROM cards c JOIN sets s ON s.id = c.set_id
+            WHERE c.id = ANY(:card_ids)
+            ORDER BY s.name
+        """),
+        {"card_ids": sorted({r.card_id for r in unpriced_rows})},
+    ).fetchall()
+    return [r.name for r in rows]
 
 
 @router.post("/upload", response_model=UploadSuccess)

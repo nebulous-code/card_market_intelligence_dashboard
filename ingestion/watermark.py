@@ -98,9 +98,20 @@ def set_watermark(
     )
 
 
-def get_all_sets(session: Session) -> list[dict]:
+def get_priced_sets(session: Session) -> list[dict]:
     """
-    Return all sets currently in the database, ordered oldest-first.
+    Return the sets we pay to price, ordered oldest-first.
+
+    A set counts as priced when it has a PokemonPriceTracker name mapping in
+    set_identifiers. That table is already the gate -- run.py resolves a PPT
+    name before making any HTTP call and skips the set at zero credit cost
+    when the mapping is missing -- so filtering here simply asks the question
+    once, in SQL, instead of 200-odd times through a failing resolver.
+
+    That distinction matters since the catalogue ingest landed. The sets table
+    now holds every set TCGdex publishes, the large majority of which we do
+    not price; iterating all of them would produce a wall of resolver errors
+    every night and bury the real ones.
 
     Returns both the TCGdex ID (used as the watermark key and database FK)
     and the display name (passed to PokemonPriceTracker, which does not
@@ -116,6 +127,16 @@ def get_all_sets(session: Session) -> list[dict]:
         list[dict]: Each dict has keys "id" (TCGdex ID) and "name" (display name).
     """
     rows = session.execute(
-        text("SELECT id, name FROM sets ORDER BY release_date ASC NULLS LAST")
+        text("""
+            SELECT s.id, s.name
+            FROM sets s
+            WHERE EXISTS (
+                SELECT 1 FROM set_identifiers si
+                WHERE si.set_id = s.id
+                  AND si.source = 'ppt'
+                  AND si.identifier_type = 'name'
+            )
+            ORDER BY s.release_date ASC NULLS LAST
+        """)
     ).fetchall()
     return [{"id": row.id, "name": row.name} for row in rows]

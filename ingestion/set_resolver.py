@@ -145,6 +145,123 @@ def resolve_identifier(search_term: str, source: str) -> str:
     )
 
 
+class SetNotFoundError(ValueError):
+    """
+    Raised when a set_id is not present in the sets table.
+
+    Subclasses ValueError because register_identifier has always raised
+    ValueError for this case, and callers (and tests) depend on that.
+    Existing as its own type lets the YAML sync distinguish "this set has
+    not been catalogued yet" -- which is transient and recoverable -- from
+    a genuine programming error.
+    """
+
+
+def upsert_identifier(
+    set_id: str,
+    source: str,
+    identifier: str,
+    identifier_type: str,
+    session: Session | None = None,
+) -> str:
+    """
+    Insert or update one set_identifiers row, reporting what changed.
+
+    The idempotent counterpart to register_identifier, which deliberately
+    raises when a mapping already exists so an operator cannot silently
+    overwrite one by hand. A file-driven sync needs the opposite: it runs
+    every night over the same entries and must be a no-op when nothing has
+    changed.
+
+    Args:
+        set_id: The canonical set ID (must exist in the sets table).
+        source: The data source (e.g. ``"ppt"``).
+        identifier: The name or ID the source uses for this set.
+        identifier_type: ``"id"`` or ``"name"``.
+        session: Optional existing session, so a caller can wrap many
+            upserts in one transaction. When omitted a session is opened
+            and committed for this single row.
+
+    Returns:
+        str: ``"inserted"``, ``"updated"``, or ``"unchanged"``.
+
+    Raises:
+        SetNotFoundError: If ``set_id`` does not exist in sets.
+    """
+    if session is not None:
+        return _upsert_identifier(session, set_id, source, identifier, identifier_type)
+
+    with Session(_get_engine()) as own_session:
+        with own_session.begin():
+            return _upsert_identifier(
+                own_session, set_id, source, identifier, identifier_type
+            )
+
+
+def _upsert_identifier(
+    session: Session,
+    set_id: str,
+    source: str,
+    identifier: str,
+    identifier_type: str,
+) -> str:
+    """Body of upsert_identifier, run inside a caller-supplied transaction."""
+    set_exists = session.execute(
+        text("SELECT 1 FROM sets WHERE id = :set_id"),
+        {"set_id": set_id},
+    ).fetchone()
+    if not set_exists:
+        raise SetNotFoundError(
+            f"set_id={set_id!r} does not exist in the sets table. "
+            f"Run the TCGdex catalogue ingestion first."
+        )
+
+    # Read the current value first so the summary can report what an update
+    # actually changed -- "Jungle -> Jungle (Base)" is the line that makes a
+    # surprising edit obvious. The table holds tens of rows, so the extra
+    # SELECT costs nothing.
+    previous = session.execute(
+        text("""
+            SELECT identifier FROM set_identifiers
+            WHERE set_id = :set_id AND source = :source
+              AND identifier_type = :identifier_type
+        """),
+        {"set_id": set_id, "source": source, "identifier_type": identifier_type},
+    ).scalar()
+
+    if previous == identifier:
+        return "unchanged"
+
+    # The conflict target matches uq_set_identifiers_set_source_type.
+    session.execute(
+        text("""
+            INSERT INTO set_identifiers (set_id, source, identifier, identifier_type)
+            VALUES (:set_id, :source, :identifier, :identifier_type)
+            ON CONFLICT (set_id, source, identifier_type) DO UPDATE SET
+                identifier = EXCLUDED.identifier
+        """),
+        {
+            "set_id": set_id,
+            "source": source,
+            "identifier": identifier,
+            "identifier_type": identifier_type,
+        },
+    )
+
+    if previous is None:
+        log.info(
+            "Registered identifier: set_id=%s source=%s type=%s value=%s",
+            set_id, source, identifier_type, identifier,
+        )
+        return "inserted"
+
+    log.info(
+        "Updated identifier: set_id=%s source=%s type=%s %r -> %r",
+        set_id, source, identifier_type, previous, identifier,
+    )
+    return "updated"
+
+
 def register_identifier(set_id: str, source: str, identifier: str, identifier_type: str) -> None:
     """
     Insert a new row into set_identifiers.
@@ -170,7 +287,7 @@ def register_identifier(set_id: str, source: str, identifier: str, identifier_ty
                 {"set_id": set_id},
             ).fetchone()
             if not set_exists:
-                raise ValueError(
+                raise SetNotFoundError(
                     f"set_id={set_id!r} does not exist in the sets table. "
                     f"Run the TCGdex ingestion for this set first."
                 )

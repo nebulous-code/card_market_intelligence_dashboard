@@ -47,11 +47,19 @@ class UploadValidationFailure(BaseModel):
 
 
 class UploadSuccess(BaseModel):
-    """Returned when an upload (or mock load) creates a session."""
+    """Returned when an upload (or mock load) creates a session.
+
+    ``unpriced_count`` and ``unpriced_message`` are the earliest and most
+    reliable disclosure that part of the collection cannot be valued. The
+    dashboard banner is dismissible and the Excel column only helps someone
+    reading row by row, so this is the one the user is guaranteed to see.
+    """
 
     session_id: str
     card_count: int
     set_count: int
+    unpriced_count: int = 0
+    unpriced_message: str | None = None
 
 
 class SessionResponse(BaseModel):
@@ -86,6 +94,11 @@ class CollectionCardWithPrice(BaseModel):
     quantity: int
     market_price: Decimal | None = None
     purchase_price: Decimal | None = None
+    # True when this row contributes nothing to any total. The frontend
+    # aggregations already skip null prices silently; these two let the UI
+    # say so out loud instead.
+    price_missing: bool = False
+    price_missing_reason: str | None = None
 
 
 class CollectionCardsWithPricesResponse(BaseModel):

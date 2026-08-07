@@ -597,3 +597,116 @@ def test_excel_returns_503_when_template_missing(
     monkeypatch.setattr(mod, "TEMPLATE_PATH", Path("/nonexistent/template.xlsx"))
     response = client.get("/collection/excel")
     assert response.status_code == 503
+
+
+# --- unpriced disclosure on upload ------------------------------------------
+#
+# The upload response is the one disclosure the user is guaranteed to see:
+# the dashboard banner is dismissible and the Excel columns only help
+# someone reading row by row. Silent incompleteness -- a total that quietly
+# omits part of a collection -- is worse than an error.
+
+
+def _add_unpriced_set(db_session, set_id="base2", name="Jungle", card_id="base2-10"):
+    """A real set with real cards that we do not buy price data for."""
+    db_session.execute(
+        text(
+            "INSERT INTO sets (id, name, series, printed_total, created_at) "
+            "VALUES (:sid, :name, 'Base', 64, NOW())"
+        ),
+        {"sid": set_id, "name": name},
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO cards (id, set_id, name, number, created_at) "
+            "VALUES (:cid, :sid, 'Scyther', '10', NOW())"
+        ),
+        {"cid": card_id, "sid": set_id},
+    )
+    db_session.execute(
+        text(
+            "INSERT INTO set_identifiers (set_id, source, identifier, identifier_type) "
+            "VALUES (:sid, 'tcgdex', :name, 'name')"
+        ),
+        {"sid": set_id, "name": name},
+    )
+
+
+def test_upload_reports_no_unpriced_rows_when_everything_is_priced(
+    client, sample_set, sample_cards, sample_snapshots, session_cleanup
+):
+    body = _build_workbook([_valid()])
+    resp = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", body, "application/octet-stream")},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    session_cleanup.append(payload["session_id"])
+    assert payload["unpriced_count"] == 0
+    assert payload["unpriced_message"] is None
+
+
+def test_upload_names_the_unpriced_sets(
+    client, db_session, sample_set, sample_cards, sample_snapshots, session_cleanup
+):
+    """A partial gap: some rows valued, some not."""
+    _add_unpriced_set(db_session)
+    body = _build_workbook([
+        _valid(),
+        _valid(**{"Set": "Jungle", "Card Number": 10, "Quantity": 3}),
+    ])
+    resp = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", body, "application/octet-stream")},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    session_cleanup.append(payload["session_id"])
+
+    # Quantity-weighted: three copies read as three cards, not one row.
+    assert payload["unpriced_count"] == 3
+    msg = payload["unpriced_message"]
+    assert "Jungle" in msg
+    assert "Everything else is valued as normal" in msg
+
+
+def test_upload_uses_distinct_wording_when_nothing_can_be_valued(
+    client, db_session, sample_set, sample_cards, sample_snapshots, session_cleanup
+):
+    """A dashboard with no valuations anywhere reads as broken unless it is
+    named for what it is, so this case gets its own message."""
+    _add_unpriced_set(db_session)
+    body = _build_workbook([_valid(**{"Set": "Jungle", "Card Number": 10})])
+    resp = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", body, "application/octet-stream")},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    session_cleanup.append(payload["session_id"])
+
+    msg = payload["unpriced_message"]
+    assert "any of the sets" in msg
+    assert "Your card list is still here" in msg
+    assert "the sets are still real" in msg
+
+
+def test_unpriced_message_caps_the_named_sets(
+    client, db_session, sample_set, sample_cards, sample_snapshots, session_cleanup
+):
+    """Unbounded set lists would run to arbitrary length."""
+    rows = []
+    for i, name in enumerate(["Alpha", "Bravo", "Charlie", "Delta"]):
+        sid = f"unp{i}"
+        _add_unpriced_set(db_session, set_id=sid, name=name, card_id=f"{sid}-10")
+        rows.append(_valid(**{"Set": name, "Card Number": 10}))
+
+    resp = client.post(
+        "/collection/upload",
+        files={"file": ("c.xlsx", _build_workbook(rows), "application/octet-stream")},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    session_cleanup.append(payload["session_id"])
+    assert "and 1 more" in payload["unpriced_message"]

@@ -170,3 +170,78 @@ def test_engine_is_cached(seed_session):
     e1 = set_resolver._get_engine()
     e2 = set_resolver._get_engine()
     assert e1 is e2
+
+
+# --- upsert_identifier ------------------------------------------------------
+
+
+def test_upsert_identifier_inserts_updates_then_reports_unchanged(seed_session):
+    """The three-way return is what lets the nightly summary say what
+    actually changed rather than 'sync ran'."""
+    import set_resolver
+    from set_resolver import upsert_identifier
+
+    set_resolver._engine = None
+    seed_session.execute(
+        text(
+            "INSERT INTO sets (id, name, series, printed_total, created_at) "
+            "VALUES ('res_up', 'Up', 'X', 1, NOW())"
+        )
+    )
+    seed_session.commit()
+
+    assert upsert_identifier("res_up", "ppt", "Old Name", "name") == "inserted"
+    assert upsert_identifier("res_up", "ppt", "New Name", "name") == "updated"
+    # A no-op re-sync must write nothing -- this is what makes the nightly
+    # run quiet when the YAML has not changed.
+    assert upsert_identifier("res_up", "ppt", "New Name", "name") == "unchanged"
+
+    row = seed_session.execute(
+        text(
+            "SELECT identifier FROM set_identifiers "
+            "WHERE set_id = 'res_up' AND source = 'ppt' AND identifier_type = 'name'"
+        )
+    ).fetchone()
+    assert row.identifier == "New Name"
+
+
+def test_upsert_identifier_rejects_a_set_that_is_not_catalogued(seed_session):
+    import pytest
+
+    import set_resolver
+    from set_resolver import SetNotFoundError, upsert_identifier
+
+    set_resolver._engine = None
+    with pytest.raises(SetNotFoundError):
+        upsert_identifier("res_ghost", "ppt", "Ghost", "name")
+
+
+def test_set_not_found_error_is_a_value_error():
+    """register_identifier has always raised ValueError for this; callers
+    and tests depend on it."""
+    from set_resolver import SetNotFoundError
+
+    assert issubclass(SetNotFoundError, ValueError)
+
+
+def test_upsert_identifier_accepts_a_caller_supplied_session(seed_session):
+    """The YAML sync wraps every entry in one transaction."""
+    import set_resolver
+    from set_resolver import upsert_identifier
+    from sqlalchemy.orm import Session as SASession
+
+    set_resolver._engine = None
+    seed_session.execute(
+        text(
+            "INSERT INTO sets (id, name, series, printed_total, created_at) "
+            "VALUES ('res_sess', 'Sess', 'X', 1, NOW())"
+        )
+    )
+    seed_session.commit()
+
+    engine = create_engine(os.environ["DATABASE_URL"])
+    with SASession(engine) as s:
+        with s.begin():
+            assert upsert_identifier(
+                "res_sess", "ppt", "Shared", "name", session=s
+            ) == "inserted"

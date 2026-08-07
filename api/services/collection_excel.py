@@ -31,6 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from schemas.collection import ParsedCollectionRow
+from services.pricing_coverage import coverage_reasons
 from services.xlsx_patcher import patch_tables
 
 
@@ -131,6 +132,7 @@ def _collect_details_rows(
     metadata = _fetch_card_metadata(db, card_ids)
     conditions_needed = sorted({r.condition for r in parsed_rows} | {"NM"})
     prices = _fetch_latest_prices(db, card_ids, conditions_needed)
+    reasons = coverage_reasons(db, card_ids)
 
     out: list[dict] = []
     for row in parsed_rows:
@@ -138,8 +140,14 @@ def _collect_details_rows(
         if meta is None:  # pragma: no cover -- session rows reference live cards
             continue
         market_price, fellback = _resolve_market_price(prices, row.card_id, row.condition)
+        # No price at all, as opposed to a price we derived by falling back
+        # to NM. These two must never both be true: pricing_warning means
+        # "treat this number with care", price_missing means "there is no
+        # number". A variant row with no price would otherwise set both.
+        price_missing = market_price is None
         has_variant = bool(row.variant)
-        pricing_warning = bool(fellback or has_variant)
+        pricing_warning = bool(fellback or has_variant) and not price_missing
+        price_missing_reason = reasons.get(row.card_id) if price_missing else None
 
         quantity = row.quantity
         purchase_total = (
@@ -182,6 +190,8 @@ def _collect_details_rows(
                 "gain_dollar": gain_dollar,
                 "gain_percent": gain_percent,
                 "pricing_warning": pricing_warning,
+                "price_missing": price_missing,
+                "price_missing_reason": price_missing_reason,
             }
         )
     return out
@@ -374,6 +384,8 @@ _DETAILS_COLUMNS = (
     "gain_dollar",
     "gain_percent",
     "pricing_warning",
+    "price_missing",
+    "price_missing_reason",
 )
 _MULTIPLIERS_COLUMNS = (
     "set_id",

@@ -20,15 +20,18 @@ If revisited, the natural shape is a direct connection to the Postgres instance 
 
 ---
 
-## Custom Domain
+## Custom Domain — API Half
 
-Replace the default `onrender.com` subdomain with a custom domain name for both the frontend and API services. A custom domain makes the portfolio link more memorable and professional when sharing with hiring managers.
+The frontend now serves from `cards.nebulouscode.com`. The API deliberately stayed on its Render hostname, so this entry covers only the remaining half.
 
-- Purchase a domain (Namecheap, Cloudflare, etc.) — typically $10-15/year
-- Configure DNS CNAME records pointing to the Render service URLs
-- Render handles TLS certificate provisioning automatically
-- Update CORS allowed origins in the API to reflect the new domain
-- Update `VITE_API_BASE_URL` and `FRONTEND_URL` environment variables in Render
+Moving the API under `nebulouscode.com` as well — `api.cards.nebulouscode.com` is the natural shape — would buy one concrete thing beyond tidiness. Today the two sides sit on different registrable domains, so the browser treats them as separate sites and the collection session cookie must be `SameSite=None`. Under a shared registrable domain they become same-site and it could drop to `SameSite=Lax`, which is the safer default and does not depend on third-party cookie behaviour that browsers keep tightening.
+
+- A second CNAME pointing at the API service; Render provisions TLS automatically
+- Update `VITE_API_BASE_URL` in the frontend service
+- `FRONTEND_URL` is already correct and would not change
+- Relax `_cookie_samesite()` in `api/routers/collection.py` from `none` to `lax`, which its docstring already flags
+
+Not urgent. The current setup works; this removes a workaround rather than fixing a bug.
 
 ---
 
@@ -139,6 +142,18 @@ The project currently targets Base Set, Jungle, Fossil, and Pokémon 151. Future
 - Promo cards — harder to map but valuable for completionists
 
 Expansion is straightforward once the set mapping infrastructure (M03_S01) is stable — it's primarily an operational task of registering new sets and running ingestion.
+
+---
+
+## Unpriced-Card Count on the Dashboard
+
+Deferred from the pricing coverage design (`docs/PRICING_COVERAGE_DESIGN.md`). That design adds `price_missing` and `price_missing_reason` columns to the collection table, which is the durable record of what was excluded from a valuation — but it only helps someone who already suspects a problem and goes looking.
+
+A single figure on the Dashboard, "cards without pricing: N", would make it discoverable without any of the layout difficulty that made a dynamic warning block unattractive. One cell, fixed height, sitting where the user is already reading the totals it qualifies.
+
+Applies to both the Excel Dashboard sheet and the web dashboard. On the web side it may be redundant with the header banner that design already calls for; on the Excel side there is no equivalent, so the KPI is the only discoverability mechanism the workbook would have beyond the About sheet.
+
+Worth revisiting once there is evidence of people actually hitting unpriced sets — the count is only interesting if it is sometimes non-zero.
 
 ---
 
