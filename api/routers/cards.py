@@ -38,6 +38,29 @@ def _label_maps(db: Session) -> tuple[dict[str, str], dict[str | None, str]]:
     return cond, var
 
 
+def _variant_precedence(db: Session) -> dict[str | None, int]:
+    """Load ``variant value -> display_order`` for picking a default printing.
+
+    ``canonical_variants.display_order`` already ranks printings from plainest
+    to most collectible -- Standard 10, Holofoil 20, Reverse Holo 30, Unlimited
+    40, 1st Edition 50, 1st Ed. Holo 60. That is exactly the order a price
+    should default to: someone opening a card wants what the card ordinarily
+    costs, not what its most premium printing costs.
+
+    It cannot simply be "the Standard variant", because 204 of the 434 priced
+    cards have no Standard row at all -- every Jungle and Fossil card is
+    holo-or-1st-edition only. Taking the lowest display_order that the card
+    actually has gives Holofoil for those, and Unlimited rather than 1st
+    Edition for the non-holos, without special-casing any set.
+
+    Unknown values sort last so a variant added upstream before it is
+    catalogued never silently becomes the default.
+    """
+    return {
+        row.value: row.display_order for row in db.query(CanonicalVariant).all()
+    }
+
+
 def _rarity_labels(db: Session) -> dict[str, str]:
     """Load the rarity canonical -> display label dict once per request."""
     return {row.value: row.display_label for row in db.query(CanonicalRarity).all()}

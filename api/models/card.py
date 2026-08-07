@@ -68,10 +68,24 @@ class Card(Base):
     set: Mapped["Set"] = relationship("Set", back_populates="cards")  # noqa: F821
 
     # Relationship to price snapshots, ordered newest first.
-    # The ordering is applied here so that any code that accesses
-    # card.price_snapshots always gets them in a predictable order.
+    #
+    # Sorted by captured_date -- the market day the price belongs to -- not
+    # captured_at, which is merely when we wrote the row. A history ingest
+    # writes ~180 market days in a single statement, so every one of those
+    # rows shares an identical captured_at down to the microsecond. Ordering
+    # by it left the sort with nothing to discriminate on, and get_card's
+    # "first row per (condition, variant) is the newest" assumption then
+    # picked an arbitrary row -- in practice the oldest day in the window.
+    # Fossil's card page reported a February price as current for months.
+    #
+    # captured_at remains as the tiebreak so that two rows for the same
+    # market day resolve to the more recently ingested one.
     price_snapshots: Mapped[list["PriceSnapshot"]] = relationship(
-        "PriceSnapshot", back_populates="card", order_by="PriceSnapshot.captured_at.desc()"
+        "PriceSnapshot",
+        back_populates="card",
+        order_by=(
+            "PriceSnapshot.captured_date.desc(), PriceSnapshot.captured_at.desc()"
+        ),
     )
 
 

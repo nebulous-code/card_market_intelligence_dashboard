@@ -109,3 +109,61 @@ def test_get_prices_empty_when_set_has_no_prices(client, sample_set, sample_card
     response = client.get("/sets/base1/cards/prices")
     assert response.status_code == 200
     assert response.json()["prices"] == {}
+
+
+def test_set_prices_lead_with_the_plainest_printing(client, db_session, sample_set, sample_cards):
+    """The card table quotes the first NM row, so ordering decides the price.
+
+    The SQL must lead its ORDER BY with the DISTINCT ON columns, which sorts
+    variants alphabetically -- and Postgres puts NULLs last, so "1st_edition"
+    led and Standard trailed. Every dual-printing card was quoted at its most
+    collectible price: Aerodactyl showed $73.67 (1st Ed. Holo) rather than
+    $37.03 (Holofoil).
+    """
+    from datetime import date, datetime
+    from decimal import Decimal
+
+    from models.card import PriceSnapshot
+
+    at = datetime(2026, 8, 7, 12, 0)
+    for variant, price in [
+        ("1st_edition_holofoil", "73.67"),   # sorts first alphabetically
+        ("holofoil", "37.03"),               # the plainer printing we want
+    ]:
+        db_session.add(
+            PriceSnapshot(
+                card_id="base1-4", source="tcgplayer", condition="NM",
+                variant=variant, market_price=Decimal(price),
+                captured_at=at, captured_date=date(2026, 8, 7),
+            )
+        )
+    db_session.flush()
+
+    rows = client.get("/sets/base1/cards/prices").json()["prices"]["base1-4"]
+    nm = [r for r in rows if r["condition"] == "NM"]
+    assert float(nm[0]["market_price"]) == 37.03
+    assert nm[0]["variant_label"] == "Holofoil"
+
+
+def test_set_prices_prefer_standard_when_it_exists(client, db_session, sample_set, sample_cards):
+    """Standard outranks every decorated printing."""
+    from datetime import date, datetime
+    from decimal import Decimal
+
+    from models.card import PriceSnapshot
+
+    at = datetime(2026, 8, 7, 12, 0)
+    for variant, price in [("reverse_holofoil", "0.40"), (None, "0.17")]:
+        db_session.add(
+            PriceSnapshot(
+                card_id="base1-58", source="tcgplayer", condition="NM",
+                variant=variant, market_price=Decimal(price),
+                captured_at=at, captured_date=date(2026, 8, 7),
+            )
+        )
+    db_session.flush()
+
+    rows = client.get("/sets/base1/cards/prices").json()["prices"]["base1-58"]
+    nm = [r for r in rows if r["condition"] == "NM"]
+    assert float(nm[0]["market_price"]) == 0.17
+    assert nm[0]["variant_label"] == "Standard"

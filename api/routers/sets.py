@@ -16,7 +16,13 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.set import Set
 from models.card import Card, PriceSnapshot
-from routers.cards import _label_maps, _rarity_labels, _to_card_response, _to_snapshot_response
+from routers.cards import (
+    _label_maps,
+    _rarity_labels,
+    _to_card_response,
+    _to_snapshot_response,
+    _variant_precedence,
+)
 from schemas.card import CardResponse, PriceSnapshotResponse, SetCardPricesResponse
 from schemas.set import SetResponse
 
@@ -233,6 +239,10 @@ def get_prices_for_set(set_id: str, db: Session = Depends(get_db)):
             PriceSnapshot.card_id,
             PriceSnapshot.condition,
             PriceSnapshot.variant,
+            # captured_date, not captured_at: a history ingest writes ~180
+            # market days under one timestamp, so captured_at cannot order
+            # them and DISTINCT ON would keep an arbitrary day.
+            PriceSnapshot.captured_date.desc(),
             PriceSnapshot.captured_at.desc(),
         )
         .all()
@@ -241,6 +251,23 @@ def get_prices_for_set(set_id: str, db: Session = Depends(get_db)):
     prices: dict[str, list] = {}
     for snap in snapshots:
         prices.setdefault(snap.card_id, []).append(snap)
+
+    # Order each card's snapshots so the plainest printing comes first.
+    #
+    # The SQL above must lead its ORDER BY with the DISTINCT ON columns, which
+    # sorts variants alphabetically -- and Postgres puts NULLs last, so
+    # "1st_edition" led and Standard trailed. The card table takes the first
+    # NM row it finds, so every dual-printing card was quoted at its 1st
+    # Edition price. Re-sorting here rather than in SQL keeps DISTINCT ON
+    # intact; the list is a few thousand rows at most.
+    precedence = _variant_precedence(db)
+    for snaps in prices.values():
+        snaps.sort(
+            key=lambda s: (
+                precedence.get(s.variant, 999),
+                s.condition,
+            )
+        )
 
     cond_labels, variant_labels = _label_maps(db)
     return SetCardPricesResponse(
